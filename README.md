@@ -1,8 +1,8 @@
 # Repositório SSI 25/26
 
-- Nº Aluno 1 - Nome Aluno 1 (a preencher)
-- Nº Aluno 2 - Nome Aluno 2 (a preencher)
-- Nº Aluno 3 - Nome Aluno 3 (a preencher)
+- A104522 - Maria Inês Rocha Pinto Gracias Fernandes
+- A104530 - Tiago Rodrigues Barros 
+- A104539 - João Pedro Ferreira e Ferreira 
 
 ### Guiões Práticos
 
