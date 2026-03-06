@@ -21,4 +21,3 @@ sudo chmod u+s mycat
 # Exercicio 6
 ./mycat braga.txt
 # Funcionou 
-

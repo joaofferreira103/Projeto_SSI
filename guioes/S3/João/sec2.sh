@@ -49,7 +49,7 @@ groups
 
 # Exercicio 8
 nano braga.txt
-# tudo igual????? perguntar ao musk
+# tudo igual (!?)
 
 # Exercicio 9
 cd dir2 
