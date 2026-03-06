@@ -1,7 +1,7 @@
 #!/bin/bash 
 
 # Exercicio 1 
-sudo touch mycat.c # como é que o musk fez sem sudo???
+sudo touch mycat.c 
 
 # Exercicio 2
 sudo adduser userssi
