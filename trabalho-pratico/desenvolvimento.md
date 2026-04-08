@@ -1,0 +1,155 @@
+## Geral:
+
+SISTEMA DE AUTENTICAÇÃO:
+
+CLIENT connects
+    │
+    ▼
+Server: estado = UNAUTHENTICATED
+    │
+    ├─ recv {"type": "register", ...} ──► criar user na DB ──► {"type": "ok"} ou {"type": "error"}
+    │
+    ├─ recv {"type": "login", ...}    ──► verificar hash   ──► {"type": "ok"} ou {"type": "error"}
+    │                                                              │
+    │                                                    estado = AUTHENTICATED
+    │                                                    username guardado na thread
+    ▼
+  Loop de mensagens (só aceita se AUTHENTICATED)
+
+
+## Onde e como guardar os ultizadores
+
+Guardar chaves dos utilizadores encriptadas numa Base de Dados
+
+Base de dados a utilizar: SQLite, porquê?
+
+não é demasiado complexa e suporta threading, muito fácil de utilizar com python
+a outra opção era json mas não suporta threading sem locks e é dificil de escalar.
+
+
+SECURITY NOTE (honest-but-curious server):
+  Even the server only sees the scrypt hash, never the plaintext password.
+  An attacker who steals the database still can't recover passwords easily.
+
+## Server
+
+temos ligações tcp threaded (1 thread por socket) assim podemos ter varios clients ligados ao mm tempo
+
+Para cada accept(), cria uma nova thread com handle_client. O SO_REUSEADDR é um detalhe prático, sem ele, cada vez que reiniciavas o servidor durante desenvolvimento terias de esperar ~60 segundos pelo OS.
+
+na fase de routing (quando o servidor tem de entregar mensagens a clientes específicos), vamos precisar de um dicionário partilhado {username: socket} protegido por um threading.Lock()
+
+**PARTE DA AUTENTICAÇÃO**
+
+Cada thread de cliente tem agora dois estados explícitos: UNAUTHENTICATED e AUTHENTICATED. Qualquer mensagem que não seja register/login antes de autenticar é rejeitada. O connected_users dict com um lock vai ser a base do routing na Fase 3.
+
+- Each client thread now has an explicit authentication state machine
+  - Messages are now JSON (via send_json/recv_json) instead of raw strings
+  - A Database instance is shared across all threads (thread-safe via its own lock)
+  - Unauthenticated clients can only send "register" or "login" messages
+  - After login, the client enters the (still echoing) chat loop
+
+STATE MACHINE PER CLIENT:
+  UNAUTHENTICATED
+      |  {"type": "register", "username": ..., "password": ...}
+      |       -> DB.register_user() -> {"type": "ok"} or {"type": "error"}
+      |
+      |  {"type": "login", "username": ..., "password": ...}
+      |       -> DB.verify_user() -> {"type": "ok", "username": ...}
+      |                                         |
+      v                                         v
+  AUTHENTICATED (username is now known)
+      |  {"type": "message", "text": ...}
+      |       -> echo back for now; Phase 3 will route to recipient
+      |
+      |  {"type": "quit"}  or  connection drops
+      -> close
+
+
+## Client
+
+Tem duas threads:
+
+A thread principal lê input do utilizador; uma thread de background recebe mensagens do servidor. O threading.Event() serve de sinal de paragem coordenado entre as duas — é um padrão importante para evitar que o programa fique "preso" após desligar.
+
+**separação auth_flow / chat_loop**
+A autenticação é síncrona e sem background thread — precisa de request/response estrito. O receive thread só arranca depois do login ter sido bem-sucedido. O getpass.getpass esconde a password no terminal (não aparece enquanto se escreve).
+
+CHANGES FROM PHASE 1:
+  - Before entering the chat loop, the client presents a menu:
+    [1] Register   [2] Login
+  - All messages are now JSON (send_json / recv_json)
+  - The receive thread handles typed messages {"type": "message", ...}
+    as well as error and ok responses
+  - After login, the chat loop sends {"type": "message", "text": ...}
+
+COMMAND REFERENCE (in chat loop):
+  /quit       — disconnect gracefully
+  anything    — sent as a chat message
+
+## Protocol (framing)
+
+WHY THIS EXISTS:
+  TCP is a stream protocol — it has no concept of "message boundaries".
+  If the server sends "Hello" and "World" back-to-back, the client might
+  receive "HelloWorld" or "Hel" + "loWorld" depending on buffering.
+ 
+  Solution: length-prefix framing.
+  Every message is sent as:
+    [4 bytes: length of payload as big-endian uint32] [payload bytes]
+
+Nota : quando adicionarmos as cifras, o único sítio a tocar é aqui — send_message encripta antes de enviar, recv_message desencripta depois de receber. O resto do código não muda.
+
+WHY JSON: We need structured messages now that the protocol has multiple
+    message types (register, login, chat, error...). JSON is human-readable
+    for debugging, and trivially extensible — adding a new field to a message
+    type doesn't break anything.
+
+    All higher-level code should use send_json/recv_json, NOT send_message/recv_message
+    directly. The raw string functions stay for internal use and testing.
+
+**HANDLER DE AUTENTICADOR**
+
+adicionados send_json / recv_json:
+O framing de bytes da Fase 1 não mudou. Apenas adicionámos uma camada acima: serializar/deserializar JSON. Isto é importante — tens um contrato claro: a camada de transporte lida com bytes, a camada de protocolo lida com dicts. Nas fases seguintes, quando adicionares cifra, ela vai entrar entre estas duas camadas.
+
+## Database:
+
+Utilizamos SQLite
+
+
+Toda a lógica de persistência está aqui e em mais lado nenhum. O server.py nunca toca em SQL. Decisões chave:
+
+scrypt para hashing — é memory-hard, resiste a brute-force com GPUs;
+
+sal aleatório por utilizador — impede ataques de rainbow table;
+
+hmac.compare_digest na verificação — evita timing attacks (sem isto, um atacante poderia medir o tempo de resposta para inferir se a password está "quase certa");
+
+threading.Lock() nos writes — SQLite com múltiplas threads precisa disto
+
+## PLANEAMENTO DO PROJETO:
+
+Phase 1: Basic Communication. Establish a simple TCP connection where the client sends text and the server echoes it back **esta ta feita**
+.
+Phase 2: Identity & Registry. Implement a way for clients to "register" with the server using a unique ID
+.
+Phase 3: The Handshake. Implement a protocol where two clients exchange keys through the server to establish a secure channel
+.
+Phase 4: E2EE Messaging. Encrypt messages on the sender's client and decrypt them only on the receiver's client
+.
+Phase 5: Persistence & Robustness. Ensure the server can restart without losing user data and handle unexpected client disconnections
+.
+Phase 6: Enhancements (Valorizações). Choose at least one advanced feature like Offline Messages, Group Chats, or Forward Secrecy
+.
+
+## COMO RODAR:
+
+# Terminal 1
+python server/server.py
+
+# Terminal 2
+python client/client.py
+
+# Terminal 3 (para testar múltiplos clientes em simultâneo)
+python client/client.py

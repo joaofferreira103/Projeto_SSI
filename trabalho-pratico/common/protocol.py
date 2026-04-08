@@ -1,9 +1,27 @@
+"""
+common/protocol.py — Message framing for the chat system.
+
+WHY THIS EXISTS:
+  TCP is a stream protocol — it has no concept of "message boundaries".
+  If the server sends "Hello" and "World" back-to-back, the client might
+  receive "HelloWorld" or "Hel" + "loWorld" depending on buffering.
+
+  Solution: length-prefix framing.
+  Every message is sent as:
+    [4 bytes: length of payload as big-endian uint32] [payload bytes]
+
+  This makes it trivial to know exactly how many bytes to read for each message.
+  This framing layer will remain useful in all future phases (even with encryption,
+  you'll still need to know how many bytes the ciphertext occupies).
+"""
+
+import json
 import socket
 import struct
 
-# Header is always 4 bytes, max message size ~4GB
+# Header is always 4 bytes (unsigned int, big-endian) = max message size ~4GB
 HEADER_SIZE = 4
-HEADER_FORMAT = "!I" 
+HEADER_FORMAT = "!I"  # network byte order (big-endian), unsigned int
 
 
 def send_message(sock: socket.socket, message: str) -> None:
@@ -47,6 +65,41 @@ def recv_message(sock: socket.socket) -> str | None:
         raise ConnectionError("Connection closed mid-message")
 
     return payload.decode("utf-8")
+
+
+import json
+
+
+def send_json(sock: socket.socket, data: dict) -> None:
+    """
+    Serialize a dict to JSON and send it as a framed message.
+
+    WHY JSON: We need structured messages now that the protocol has multiple
+    message types (register, login, chat, error...). JSON is human-readable
+    for debugging, and trivially extensible — adding a new field to a message
+    type doesn't break anything.
+
+    All higher-level code should use send_json/recv_json, NOT send_message/recv_message
+    directly. The raw string functions stay for internal use and testing.
+    """
+    send_message(sock, json.dumps(data))
+
+
+def recv_json(sock: socket.socket) -> dict | None:
+    """
+    Receive a framed message and deserialize it from JSON.
+
+    Returns:
+        A dict, or None if the connection was closed cleanly.
+
+    Raises:
+        ConnectionError: if the connection breaks mid-message.
+        ValueError: if the received bytes are not valid JSON.
+    """
+    raw = recv_message(sock)
+    if raw is None:
+        return None
+    return json.loads(raw)
 
 
 def _recv_exact(sock: socket.socket, n: int) -> bytes | None:
