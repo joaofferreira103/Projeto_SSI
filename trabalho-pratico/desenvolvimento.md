@@ -128,6 +128,21 @@ hmac.compare_digest na verificação — evita timing attacks (sem isto, um atac
 
 threading.Lock() nos writes — SQLite com múltiplas threads precisa disto
 
+**estrutura da db**
+
+- username is the primary key (unique identifier per the spec)
+          - password_hash stores "salt_hex:hash_hex"
+          - created_at is stored as ISO8601 text (SQLite has no native datetime)
+          - Future tables (messages, public_keys) will reference username via FK
+
+
+
+**encriptação**
+
+Hash a plaintext password with a fresh random salt using scrypt from the `cryptography` library.
+
+- > Returns a string in the format "salt_hex:hash_hex" suitable for storage.
+
 ## PLANEAMENTO DO PROJETO:
 
 Phase 1: Basic Communication. Establish a simple TCP connection where the client sends text and the server echoes it back **esta ta feita**
