@@ -135,11 +135,12 @@ threading.Lock() nos writes — SQLite com múltiplas threads precisa disto
           - created_at is stored as ISO8601 text (SQLite has no native datetime)
           - Future tables (messages, public_keys) will reference username via FK
 
-
-
 **encriptação**
 
 Hash a plaintext password with a fresh random salt using scrypt from the `cryptography` library.
+
+**Na fase 3**
+criar uma tabela para as chaves publicas
 
 - > Returns a string in the format "salt_hex:hash_hex" suitable for storage.
 
@@ -147,7 +148,7 @@ Hash a plaintext password with a fresh random salt using scrypt from the `crypto
 
 Phase 1: Basic Communication. Establish a simple TCP connection where the client sends text and the server echoes it back **esta ta feita**
 .
-Phase 2: Identity & Registry. Implement a way for clients to "register" with the server using a unique ID
+Phase 2: Identity & Registry. Implement a way for clients to "register" with the server using a unique ID **tbm ta feita**
 .
 Phase 3: The Handshake. Implement a protocol where two clients exchange keys through the server to establish a secure channel
 .
