@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from common.protocol import send_json, recv_json
 from database import Database
 
+
 HOST = "0.0.0.0"
 PORT = 9000
 
@@ -89,12 +90,41 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
             elif msg_type == "quit":
                 send_json(conn, {"type": "ok", "message": "Goodbye!"})
                 break
+            
+                        # No topo, importa a função de limpeza
+            # (o resto do ficheiro fica igual)
+
+            elif msg_type == "publish_key":
+                # Cliente envia a sua chave pública efémera após login
+                pub_hex = msg.get("public_key", "")
+                if pub_hex:
+                    db.store_public_key(username, pub_hex)
+                    send_json(conn, {"type": "ok", "message": "Public key stored"})
+                else:
+                    send_json(conn, {"type": "error", "message": "Missing public_key field"})
+
+            elif msg_type == "get_key":
+                # Cliente pede a chave pública de outro utilizador
+                target = msg.get("username", "")
+                pub_hex = db.get_public_key(target)
+                if pub_hex:
+                    send_json(conn, {
+                        "type": "key_response",
+                        "username": target,
+                        "public_key": pub_hex,
+                    })
+                else:
+                    send_json(conn, {
+                        "type": "error",
+                        "message": f"No public key found for '{target}' (offline?)"
+                    })
 
             else:
                 send_json(conn, {
                     "type": "error",
                     "message": f"Unknown message type: '{msg_type}'"
                 })
+            
 
     except ConnectionError as e:
         print(f"[SERVER] Connection error with {addr}: {e}")
@@ -103,9 +133,14 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
     finally:
         if username:
             with connected_users_lock:
+                db.remove_public_key(username)  # Limpa a chave pública do utilizador que saiu
                 connected_users.pop(username, None)
             print(f"[SERVER] '{username}' removed from active users")
         conn.close()
+
+
+
+
 
 
 def start_server(host: str = HOST, port: int = PORT) -> None:

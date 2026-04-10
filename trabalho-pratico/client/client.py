@@ -4,11 +4,65 @@ import sys
 import os
 import getpass
 
+# Ensure project root is importable when running this file directly.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 from common.protocol import send_json, recv_json
+from common.crypto import (
+    generate_x25519_keypair,
+    derive_shared_secret,
+    public_bytes_to_hex,
+    hex_to_public_bytes,
+)
 
 HOST = "127.0.0.1"
 PORT = 9000
+
+# Variável de estado por sessão
+_private_key = None        # chave privada efémera desta sessão
+_session_keys: dict = {}   # {username: bytes} — segredo derivado por par
+
+
+
+def publish_my_key(sock: socket.socket) -> None:
+    """
+    Gera par efémero e publica a chave pública no servidor.
+    Chamado imediatamente após login bem-sucedido.
+    """
+    global _private_key
+    _private_key, pub_bytes = generate_x25519_keypair()
+    send_json(sock, {
+        "type": "publish_key",
+        "public_key": public_bytes_to_hex(pub_bytes),
+    })
+    # A resposta ok/error é tratada pelo receive_loop normal
+
+def do_handshake(sock: socket.socket, peer_username: str) -> None:
+    """
+    Inicia handshake com outro utilizador: pede a chave pública dele
+    ao servidor e deriva o segredo partilhado.
+
+    Uso: o utilizador escreve /connect bob no chat.
+    """
+    send_json(sock, {"type": "get_key", "username": peer_username})
+    # A resposta chega assincronamente no receive_loop
+
+def _handle_key_response(msg: dict) -> None:
+    """
+    Chamado pelo receive_loop quando chega um key_response.
+    Deriva e armazena o segredo partilhado com o peer.
+    """
+    global _session_keys
+    peer = msg.get("username")
+    pub_hex = msg.get("public_key")
+    if not peer or not pub_hex:
+        return
+
+    peer_pub_bytes = hex_to_public_bytes(pub_hex)
+    secret = derive_shared_secret(_private_key, peer_pub_bytes)
+    _session_keys[peer] = secret
+    print(f"\n  [CRYPTO] Canal seguro estabelecido com '{peer}' ✓")
+    print("  > ", end="", flush=True)
 
 
 def receive_loop(sock: socket.socket, stop_event: threading.Event) -> None:
@@ -40,6 +94,9 @@ def receive_loop(sock: socket.socket, stop_event: threading.Event) -> None:
                 # Informational — e.g., "Goodbye!"
                 print(f"\n  [INFO] {msg.get('message', '')}")
                 print("  > ", end="", flush=True)
+                
+            elif msg_type == "key_response":
+                _handle_key_response(msg)
 
         except ConnectionError:
             if not stop_event.is_set():
@@ -102,7 +159,9 @@ def auth_flow(sock: socket.socket) -> str | None:
                 return None
             print(f"  [{response.get('type', '?').upper()}] {response.get('message', '')}\n")
             if response.get("type") == "ok":
-                return response.get("username", username)
+                username = response.get("username", username)
+                publish_my_key(sock)
+                return username
             # On error, loop back and let user try again
 
 
@@ -136,6 +195,10 @@ def chat_loop(sock: socket.socket, username: str) -> None:
                 send_json(sock, {"type": "quit"})
                 stop_event.set()
                 break
+            if line.startswith("/connect "):
+                peer = line.split(" ", 1)[1].strip()
+                do_handshake(sock, peer)
+        
 
             send_json(sock, {"type": "message", "text": line})
 

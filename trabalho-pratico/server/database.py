@@ -206,3 +206,58 @@ class Database:
 
     def close(self) -> None:
         self._conn.close()
+        
+
+        
+## PUBLIC KEY MANAGEMENT TABLE:
+
+    def _initialize_schema(self) -> None:
+        with self._lock:
+            self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS users (
+                    username      TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                -- NOVA TABELA: chaves públicas efémeras por sessão.
+                -- Uma entrada por utilizador autenticado. Substituída
+                -- a cada novo login (chaves efémeras = forward secrecy).
+                CREATE TABLE IF NOT EXISTS public_keys (
+                    username    TEXT PRIMARY KEY REFERENCES users(username),
+                    public_key  TEXT NOT NULL,        -- hex dos 32 bytes Raw
+                    uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+            """)
+            self._conn.commit()
+
+    def store_public_key(self, username: str, public_key_hex: str) -> None:
+        """
+        Armazena (ou substitui) a chave pública de um utilizador.
+        INSERT OR REPLACE garante que um novo login limpa a chave antiga.
+        """
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO public_keys (username, public_key) VALUES (?, ?)",
+                (username, public_key_hex),
+            )
+            self._conn.commit()
+
+    def get_public_key(self, username: str) -> str | None:
+        """
+        Devolve a chave pública hex de um utilizador, ou None se não existir
+        (utilizador não está online / nunca fez upload da chave).
+        """
+        row = self._conn.execute(
+            "SELECT public_key FROM public_keys WHERE username = ?",
+            (username,),
+        ).fetchone()
+        return row["public_key"] if row else None
+
+    def remove_public_key(self, username: str) -> None:
+        """Limpa a chave ao fazer logout — o servidor não guarda chaves de sessões passadas."""
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM public_keys WHERE username = ?", (username,)
+            )
+            self._conn.commit()
