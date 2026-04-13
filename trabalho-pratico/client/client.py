@@ -1,10 +1,14 @@
+"""
+client/client.py — E2EE chat client.
+
+"""
+
 import socket
 import threading
 import sys
 import os
 import getpass
 
-# Ensure project root is importable when running this file directly.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.protocol import send_json, recv_json
@@ -13,21 +17,32 @@ from common.crypto import (
     derive_shared_secret,
     public_bytes_to_hex,
     hex_to_public_bytes,
+    encrypt_message,
+    decrypt_message,
 )
+
+from cryptography.exceptions import InvalidTag
 
 HOST = "127.0.0.1"
 PORT = 9000
 
-# Variável de estado por sessão
-_private_key = None        # chave privada efémera desta sessão
-_session_keys: dict = {}   # {username: bytes} — segredo derivado por par
+# Ephemeral private key for this session
+_private_key = None
+
+# Derived AES-256-GCM keys per peer: {username: bytes}
+_session_keys: dict[str, bytes] = {}
+
+# Who we're currently "talking to"
+_current_peer: str | None = None
 
 
+# ---------------------------------------------------------------------------
+# Key exchange helpers
+# ---------------------------------------------------------------------------
 
 def publish_my_key(sock: socket.socket) -> None:
     """
-    Gera par efémero e publica a chave pública no servidor.
-    Chamado imediatamente após login bem-sucedido.
+    Called immediately after a successful login.
     """
     global _private_key
     _private_key, pub_bytes = generate_x25519_keypair()
@@ -35,24 +50,25 @@ def publish_my_key(sock: socket.socket) -> None:
         "type": "publish_key",
         "public_key": public_bytes_to_hex(pub_bytes),
     })
-    # A resposta ok/error é tratada pelo receive_loop normal
+
 
 def do_handshake(sock: socket.socket, peer_username: str) -> None:
     """
-    Inicia handshake com outro utilizador: pede a chave pública dele
-    ao servidor e deriva o segredo partilhado.
-
-    Uso: o utilizador escreve /connect bob no chat.
+    Request a peer's public key from the server to initiate ECDH.
+    The actual key derivation happens in _handle_key_response when the
+    server replies asynchronously.
     """
     send_json(sock, {"type": "get_key", "username": peer_username})
-    # A resposta chega assincronamente no receive_loop
+
 
 def _handle_key_response(msg: dict) -> None:
     """
-    Chamado pelo receive_loop quando chega um key_response.
-    Deriva e armazena o segredo partilhado com o peer.
+    Called by the receive loop when a key_response arrives.
+    Derives and stores the shared AES-256-GCM key for the peer.
+    Also sets them as the current peer for /msg convenience.
     """
-    global _session_keys
+    global _session_keys, _current_peer
+
     peer = msg.get("username")
     pub_hex = msg.get("public_key")
     if not peer or not pub_hex:
@@ -61,14 +77,20 @@ def _handle_key_response(msg: dict) -> None:
     peer_pub_bytes = hex_to_public_bytes(pub_hex)
     secret = derive_shared_secret(_private_key, peer_pub_bytes)
     _session_keys[peer] = secret
-    print(f"\n  [CRYPTO] Canal seguro estabelecido com '{peer}' ✓")
+    _current_peer = peer
+
+    print(f"\n  [CRYPTO] Secure channel established with '{peer}' ✓")
+    print(f"  [CRYPTO] You can now use: /msg {peer} <text>")
     print("  > ", end="", flush=True)
 
 
+# ---------------------------------------------------------------------------
+# Receive loop (background thread)
+# ---------------------------------------------------------------------------
+
 def receive_loop(sock: socket.socket, stop_event: threading.Event) -> None:
     """
-    Background thread: receive and display messages from the server.
-    Handles all message types that can arrive during the chat phase.
+    Background thread: receive and handle all messages from the server.
     """
     while not stop_event.is_set():
         try:
@@ -82,8 +104,20 @@ def receive_loop(sock: socket.socket, stop_event: threading.Event) -> None:
 
             if msg_type == "message":
                 sender = msg.get("from", "?")
-                text = msg.get("text", "")
-                print(f"\n  {sender}: {text}")
+                ciphertext_hex = msg.get("text", "")
+
+                key = _session_keys.get(sender)
+                if key is None:
+                    
+                    print(f"\n  ⚠  {sender} [NO SESSION KEY — run /connect {sender} first]: {ciphertext_hex}")
+                else:
+                    try:
+                        plaintext = decrypt_message(key, ciphertext_hex)
+                        print(f"\n  {sender}: {plaintext}")
+                    except (InvalidTag, ValueError) as e:
+                        
+                        print(f"\n  ⚠  {sender} [DECRYPTION FAILED — message discarded]: {e}")
+
                 print("  > ", end="", flush=True)
 
             elif msg_type == "error":
@@ -91,10 +125,12 @@ def receive_loop(sock: socket.socket, stop_event: threading.Event) -> None:
                 print("  > ", end="", flush=True)
 
             elif msg_type == "ok":
-                # Informational — e.g., "Goodbye!"
-                print(f"\n  [INFO] {msg.get('message', '')}")
-                print("  > ", end="", flush=True)
-                
+                detail = msg.get("message", "")
+               
+                if not detail.startswith("Delivered to"):
+                    print(f"\n  [INFO] {detail}")
+                    print("  > ", end="", flush=True)
+
             elif msg_type == "key_response":
                 _handle_key_response(msg)
 
@@ -110,19 +146,17 @@ def receive_loop(sock: socket.socket, stop_event: threading.Event) -> None:
             break
 
 
+# ---------------------------------------------------------------------------
+# Authentication
+# ---------------------------------------------------------------------------
+
 def auth_flow(sock: socket.socket) -> str | None:
     """
-    Handle the register/login sequence before entering the chat loop.
+    Synchronous register/login loop.  Returns the logged-in username or None.
 
-    Returns the logged-in username on success, or None if the user quits.
-
-    Design note: this is a blocking, synchronous function — no background
-    thread during auth, because we need strict request/response ordering
-    (send login -> wait for ok/error -> proceed or retry).
-    The receive thread is only started AFTER this succeeds.
     """
     print("\n  ╔════════════════════════╗")
-    print("  ║     Chat E2EE v0.2     ║")
+    print("  ║     Chat E2EE v0.3     ║")
     print("  ╚════════════════════════╝\n")
 
     while True:
@@ -133,13 +167,11 @@ def auth_flow(sock: socket.socket) -> str | None:
 
         if choice == "q":
             return None
-
         if choice not in ("1", "2"):
             print("  Invalid choice.\n")
             continue
 
         username = input("  Username > ").strip()
-        # getpass hides the password while typing (no echo on terminal)
         password = getpass.getpass("  Password > ")
 
         if choice == "1":
@@ -149,9 +181,8 @@ def auth_flow(sock: socket.socket) -> str | None:
                 print("  [ERROR] Server disconnected.")
                 return None
             print(f"  [{response.get('type', '?').upper()}] {response.get('message', '')}\n")
-            # After registering, loop back so the user can login
 
-        else:  # choice == "2"
+        else:
             send_json(sock, {"type": "login", "username": username, "password": password})
             response = recv_json(sock)
             if response is None:
@@ -162,14 +193,19 @@ def auth_flow(sock: socket.socket) -> str | None:
                 username = response.get("username", username)
                 publish_my_key(sock)
                 return username
-            # On error, loop back and let user try again
 
+
+# ---------------------------------------------------------------------------
+# Chat loop
+# ---------------------------------------------------------------------------
 
 def chat_loop(sock: socket.socket, username: str) -> None:
     """
-    Main chat loop after authentication.
-    Starts the background receive thread, then reads user input.
+    Main interactive loop after authentication.
+
     """
+    global _current_peer
+
     stop_event = threading.Event()
     recv_thread = threading.Thread(
         target=receive_loop,
@@ -178,7 +214,8 @@ def chat_loop(sock: socket.socket, username: str) -> None:
     )
     recv_thread.start()
 
-    print(f"  Logged in as '{username}'. Type /quit to exit.\n")
+    print(f"  Logged in as '{username}'.")
+    print("  Commands: /connect <peer>  |  /msg <peer> <text>  |  /quit\n")
 
     try:
         while not stop_event.is_set():
@@ -191,21 +228,65 @@ def chat_loop(sock: socket.socket, username: str) -> None:
             if not line:
                 continue
 
+            # ------------------------------------------------------------------
+            # /quit
+            # ------------------------------------------------------------------
             if line.lower() == "/quit":
                 send_json(sock, {"type": "quit"})
                 stop_event.set()
                 break
+
+            # ------------------------------------------------------------------
+            # /connect <peer>  — initiate ECDH handshake
+            # ------------------------------------------------------------------
             if line.startswith("/connect "):
                 peer = line.split(" ", 1)[1].strip()
-                do_handshake(sock, peer)
-        
+                if not peer:
+                    print("  Usage: /connect <username>")
+                else:
+                    do_handshake(sock, peer)
+                continue  
 
-            send_json(sock, {"type": "message", "text": line})
+            # ------------------------------------------------------------------
+            # /msg <peer> <text>  — send encrypted message to a specific peer
+            # ------------------------------------------------------------------
+            if line.startswith("/msg "):
+                parts = line.split(" ", 2)
+                if len(parts) < 3:
+                    print("  Usage: /msg <peer> <text>")
+                    continue
+                peer, text = parts[1], parts[2]
+                _send_encrypted(sock, peer, text)
+                continue
+
+           
+            if _current_peer:
+                _send_encrypted(sock, _current_peer, line)
+            else:
+                print("  No active peer. Use /connect <peer> first, then /msg <peer> <text>.")
 
     except KeyboardInterrupt:
         pass
     finally:
         stop_event.set()
+
+
+def _send_encrypted(sock: socket.socket, peer: str, plaintext: str) -> None:
+    """
+    Encrypt `plaintext` with the session key for `peer` and send it.
+    Prints a local error if no session key exists (handshake not done yet).
+    """
+    key = _session_keys.get(peer)
+    if key is None:
+        print(f"  [ERROR] No session key for '{peer}'. Run /connect {peer} first.")
+        return
+
+    ciphertext_hex = encrypt_message(key, plaintext)
+    send_json(sock, {
+        "type": "message",
+        "to": peer,
+        "text": ciphertext_hex,   # opaque blob; server cannot read this
+    })
 
 
 def start_client(host: str = HOST, port: int = PORT) -> None:
