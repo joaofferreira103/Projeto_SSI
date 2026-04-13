@@ -194,7 +194,7 @@ Phase 1: Basic Communication. Establish a simple TCP connection where the client
 .
 Phase 2: Identity & Registry. Implement a way for clients to "register" with the server using a unique ID **tbm ta feita**
 .
-Phase 3: The Handshake. Implement a protocol where two clients exchange keys through the server to establish a secure channel
+Phase 3: The Handshake. Implement a protocol where two clients exchange keys through the server to establish a secure channel**a meio**
 .
 Phase 4: E2EE Messaging. Encrypt messages on the sender's client and decrypt them only on the receiver's client
 .
