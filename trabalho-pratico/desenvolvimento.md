@@ -80,6 +80,9 @@ STATE MACHINE PER CLIENT:
       |  {"type": "quit"}  or  connection drops
       -> close
 
+Apos autenticação recebe a chave do cliente e armazena no database.py a chave publica
+adiciona à lista de users ativos
+
 
 ## Client
 
@@ -100,7 +103,11 @@ CHANGES FROM PHASE 1:
 
 COMMAND REFERENCE (in chat loop):
   /quit       — disconnect gracefully
-  anything    — sent as a chat message
+  /connect    - conecta a outro user e trocam chaves publicas
+  /msg <destinatario> <texto> encripta e envia hex para o destinatario (requere uma chave publica associada ao destinatario na base de dados, se não existir sugere um /conncet <destinatario> primeiro)
+
+  - Messages now carry a `to` field required by the server router.
+
 
 ## Protocol (framing)
 
@@ -179,7 +186,7 @@ Assim a auditoria de segurança resume-se a analisar um único ficheiro.
     for comprometida no futuro, não compromete sessões passadas
     (contribui para forward secrecy, uma das valorizações do enunciado).
 
-**derive_shares_secret**
+**derive_shared_secret**
 
 Executa ECDH com a chave privada local e a chave pública do par, depois passa o resultado pelo HKDF para obter 32 bytes de material
 de chave uniforme.
@@ -188,13 +195,16 @@ PORQUÊ HKDF E NÃO O OUTPUT DIRETO DO ECDH:
 O ponto de curva resultante do ECDH tem estrutura matemática que reduz a entropia efetiva. O HKDF "limpa" essa estrutura
 e produz bytes uniformemente distribuídos — requisito para AES.
 
+Tem agora as funções de cifrar e decifrar uma mensagem, utiliza a chave pulica e verifica integridade do Selo, se tiver sido mexida a mensagem alterada não é passada
+
+
 ## PLANEAMENTO DO PROJETO:
 
 Phase 1: Basic Communication. Establish a simple TCP connection where the client sends text and the server echoes it back **esta ta feita**
 .
 Phase 2: Identity & Registry. Implement a way for clients to "register" with the server using a unique ID **tbm ta feita**
 .
-Phase 3: The Handshake. Implement a protocol where two clients exchange keys through the server to establish a secure channel**a meio**
+Phase 3: The Handshake. Implement a protocol where two clients exchange keys through the server to establish a secure channel**tbm ta feita**
 .
 Phase 4: E2EE Messaging. Encrypt messages on the sender's client and decrypt them only on the receiver's client
 .
@@ -203,7 +213,21 @@ Phase 5: Persistence & Robustness. Ensure the server can restart without losing 
 Phase 6: Enhancements (Valorizações). Choose at least one advanced feature like Offline Messages, Group Chats, or Forward Secrecy
 .
 
+
+## ESTADO ATUAL DO PROJETO:
+
+temos uma base de dados de users a oferecer persistencia já de utilizadores, aqui as passwords são guardadas codificadas atraves de sal da cryptography, só existe acesso à hash da password, nunca ao plain text.
+
+temos outra base de dados para as public keys, com um user associado.
+/connect -> troca de chaves é efetuda
+/msg (depende do /connect de cada lado primeiro. ex: se o bob der "/connect alice" e dps tentar "/msg alice ola" vai falhar pois a alice tem de fazer /connect bob primeiro) **corrigir isto acho eu**
+
+a fazer: obrigar a atualização da chave depois de x mensagens/ x tempo;
+interface grafica (???)
+
 ## COMO RODAR:
+
+criar um virtual environment e instalar la os packages (acho q é só cryptography) ajuda
 
 # Terminal 1
 python server/server.py

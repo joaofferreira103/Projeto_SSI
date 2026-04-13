@@ -1,9 +1,15 @@
+"""
+server/server.py — Multi-threaded chat server.
+
+"""
+
 import socket
 import threading
 import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 from common.protocol import send_json, recv_json
 from database import Database
 
@@ -11,28 +17,43 @@ from database import Database
 HOST = "0.0.0.0"
 PORT = 9000
 
-# Shared database instance — one per server process, used by all threads
 db = Database()
 
-# Registry of currently connected authenticated users: {username: socket}
-# Protected by a lock because multiple threads read/write it concurrently
-connected_users: dict = {}
+# {username: socket} — protected by a lock because multiple threads write it.
+connected_users: dict[str, socket.socket] = {}
 connected_users_lock = threading.Lock()
+
+
+def _deliver(recipient: str, envelope: dict) -> bool:
+    """
+    Try to deliver a JSON envelope to a connected user.
+
+    Returns True if delivered, False if the user is offline.
+    """
+    with connected_users_lock:
+        sock = connected_users.get(recipient)
+    if sock is None:
+        return False
+    try:
+        send_json(sock, envelope)
+        return True
+    except Exception:
+        return False
 
 
 def handle_client(conn: socket.socket, addr: tuple) -> None:
     """
     Handle one client connection through its full lifecycle:
-      1. Authentication phase (register or login)
-      2. Chat phase (only reachable after successful login)
+      Phase A — Authentication (register / login, repeatable until success)
+      Phase B — Authenticated chat (message routing, key exchange helpers)
     """
     print(f"[SERVER] Client connected: {addr}")
     username = None
 
     try:
-        # Phase A: Authentication loop
-        # The client MUST successfully login before doing anything else.
-        # We loop to allow multiple attempts (e.g., wrong password -> try again).
+        # ------------------------------------------------------------------
+        # Phase A: Authentication
+        # ------------------------------------------------------------------
         while username is None:
             msg = recv_json(conn)
             if msg is None:
@@ -65,10 +86,12 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
             else:
                 send_json(conn, {
                     "type": "error",
-                    "message": f"Unknown command '{msg_type}'. Please register or login first."
+                    "message": f"Unknown command '{msg_type}'. Please register or login first.",
                 })
 
-        # Phase B: Authenticated chat loop
+        # ------------------------------------------------------------------
+        # Phase B: Authenticated chat
+        # ------------------------------------------------------------------
         while True:
             msg = recv_json(conn)
             if msg is None:
@@ -78,24 +101,34 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
             msg_type = msg.get("type")
 
             if msg_type == "message":
-                text = msg.get("text", "")
-                print(f"[SERVER] Message from '{username}': {text!r}")
-                # Phase 2: still echoing. Phase 3 will route to a recipient.
-                send_json(conn, {
+               
+                recipient = msg.get("to", "")
+                ciphertext = msg.get("text", "")
+
+                if not recipient:
+                    send_json(conn, {"type": "error", "message": "Missing 'to' field"})
+                    continue
+
+                if recipient == username:
+                    send_json(conn, {"type": "error", "message": "Cannot send a message to yourself"})
+                    continue
+
+                delivered = _deliver(recipient, {
                     "type": "message",
                     "from": username,
-                    "text": f"[echo] {text}",
+                    "text": ciphertext,  
                 })
 
-            elif msg_type == "quit":
-                send_json(conn, {"type": "ok", "message": "Goodbye!"})
-                break
-            
-                        # No topo, importa a função de limpeza
-            # (o resto do ficheiro fica igual)
+                if not delivered:
+                    send_json(conn, {
+                        "type": "error",
+                        "message": f"'{recipient}' is not online",
+                    })
+                else:
+                  
+                    send_json(conn, {"type": "ok", "message": f"Delivered to '{recipient}'"})
 
             elif msg_type == "publish_key":
-                # Cliente envia a sua chave pública efémera após login
                 pub_hex = msg.get("public_key", "")
                 if pub_hex:
                     db.store_public_key(username, pub_hex)
@@ -104,7 +137,6 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
                     send_json(conn, {"type": "error", "message": "Missing public_key field"})
 
             elif msg_type == "get_key":
-                # Cliente pede a chave pública de outro utilizador
                 target = msg.get("username", "")
                 pub_hex = db.get_public_key(target)
                 if pub_hex:
@@ -116,15 +148,18 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
                 else:
                     send_json(conn, {
                         "type": "error",
-                        "message": f"No public key found for '{target}' (offline?)"
+                        "message": f"No public key found for '{target}' (offline?)",
                     })
+
+            elif msg_type == "quit":
+                send_json(conn, {"type": "ok", "message": "Goodbye!"})
+                break
 
             else:
                 send_json(conn, {
                     "type": "error",
-                    "message": f"Unknown message type: '{msg_type}'"
+                    "message": f"Unknown message type: '{msg_type}'",
                 })
-            
 
     except ConnectionError as e:
         print(f"[SERVER] Connection error with {addr}: {e}")
@@ -133,14 +168,10 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
     finally:
         if username:
             with connected_users_lock:
-                db.remove_public_key(username)  # Limpa a chave pública do utilizador que saiu
                 connected_users.pop(username, None)
+            db.remove_public_key(username)
             print(f"[SERVER] '{username}' removed from active users")
         conn.close()
-
-
-
-
 
 
 def start_server(host: str = HOST, port: int = PORT) -> None:
@@ -148,18 +179,15 @@ def start_server(host: str = HOST, port: int = PORT) -> None:
         server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server_sock.bind((host, port))
         server_sock.listen()
-
         print(f"[SERVER] Listening on {host}:{port}")
-
         try:
             while True:
                 conn, addr = server_sock.accept()
-                thread = threading.Thread(
+                threading.Thread(
                     target=handle_client,
                     args=(conn, addr),
                     daemon=True,
-                )
-                thread.start()
+                ).start()
         except KeyboardInterrupt:
             print("\n[SERVER] Shutting down.")
         finally:
