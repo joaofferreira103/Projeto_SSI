@@ -17,6 +17,21 @@ Server: estado = UNAUTHENTICATED
   Loop de mensagens (só aceita se AUTHENTICATED)
 
 
+## Fluxo Geral da troca de chaves:
+
+Alice faz login  →  publica pub_A no servidor
+Bob faz login    →  publica pub_B no servidor
+
+Alice escreve:   /connect bob
+  → servidor devolve pub_B
+  → Alice calcula ECDH(priv_A, pub_B) → HKDF → session_key_AB
+
+Bob escreve:     /connect alice
+  → servidor devolve pub_A
+  → Bob calcula ECDH(priv_B, pub_A) → HKDF → session_key_AB
+
+session_key_AB é igual nos dois lados — sem o servidor ter acesso
+
 ## Onde e como guardar os ultizadores
 
 Guardar chaves dos utilizadores encriptadas numa Base de Dados
@@ -144,13 +159,42 @@ criar uma tabela para as chaves publicas
 
 - > Returns a string in the format "salt_hex:hash_hex" suitable for storage.
 
+
+## Crypto.py:
+
+Módulo central de toda a lógica de cripto. Nem o cliente nem o servidor devem importar diretamente da biblioteca cryptography — usam estas funções.
+
+Assim a auditoria de segurança resume-se a analisar um único ficheiro.
+
+**generate x...key**:
+
+ Gera um par de chaves X25519 efémero.
+
+    Retorna:
+        (private_key, public_key_bytes) — a chave privada fica em memória,
+        os bytes da pública são serializados em formato Raw (32 bytes)
+        prontos para enviar pela rede.
+
+    PORQUÊ EFÉMERO: cada sessão gera um par novo. Se uma chave privada
+    for comprometida no futuro, não compromete sessões passadas
+    (contribui para forward secrecy, uma das valorizações do enunciado).
+
+**derive_shares_secret**
+
+Executa ECDH com a chave privada local e a chave pública do par, depois passa o resultado pelo HKDF para obter 32 bytes de material
+de chave uniforme.
+
+PORQUÊ HKDF E NÃO O OUTPUT DIRETO DO ECDH: 
+O ponto de curva resultante do ECDH tem estrutura matemática que reduz a entropia efetiva. O HKDF "limpa" essa estrutura
+e produz bytes uniformemente distribuídos — requisito para AES.
+
 ## PLANEAMENTO DO PROJETO:
 
 Phase 1: Basic Communication. Establish a simple TCP connection where the client sends text and the server echoes it back **esta ta feita**
 .
 Phase 2: Identity & Registry. Implement a way for clients to "register" with the server using a unique ID **tbm ta feita**
 .
-Phase 3: The Handshake. Implement a protocol where two clients exchange keys through the server to establish a secure channel
+Phase 3: The Handshake. Implement a protocol where two clients exchange keys through the server to establish a secure channel**a meio**
 .
 Phase 4: E2EE Messaging. Encrypt messages on the sender's client and decrypt them only on the receiver's client
 .
@@ -169,3 +213,6 @@ python client/client.py
 
 # Terminal 3 (para testar múltiplos clientes em simultâneo)
 python client/client.py
+
+# Se der erro de address already in use:
+kill $(lsof -t -i :9000) 
