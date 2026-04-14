@@ -32,6 +32,12 @@ Bob escreve:     /connect alice
 
 session_key_AB é igual nos dois lados — sem o servidor ter acesso
 
+
+
+![Texto alternativo](../fotos/Captura%20de%20ecrã%202026-04-10,%20às%2014.51.27.png)
+
+
+
 ## Onde e como guardar os ultizadores
 
 Guardar chaves dos utilizadores encriptadas numa Base de Dados
