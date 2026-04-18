@@ -145,6 +145,13 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
                         "username": target,
                         "public_key": pub_hex,
                     })
+                    my_pub_hex = db.get_public_key(username)
+                    if my_pub_hex:
+                        _deliver(target, {
+                            "type": "key_response",
+                            "username": username,
+                            "public_key": my_pub_hex,
+                        })
                 else:
                     send_json(conn, {
                         "type": "error",
