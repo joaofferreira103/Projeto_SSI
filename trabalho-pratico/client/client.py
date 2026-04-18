@@ -35,6 +35,10 @@ _session_keys: dict[str, bytes] = {}
 # Who we're currently "talking to"
 _current_peer: str | None = None
 
+_message_counts: dict[str, int] = {}
+
+KEY_ROTATION_THRESHOLD = 50  # rotaciona a cada 50 mensagens enviadas
+
 
 # ---------------------------------------------------------------------------
 # Key exchange helpers
@@ -272,22 +276,35 @@ def chat_loop(sock: socket.socket, username: str) -> None:
 
 
 def _send_encrypted(sock: socket.socket, peer: str, plaintext: str) -> None:
-    """
-    Encrypt `plaintext` with the session key for `peer` and send it.
-    Prints a local error if no session key exists (handshake not done yet).
-    """
     key = _session_keys.get(peer)
     if key is None:
         print(f"  [ERROR] No session key for '{peer}'. Run /connect {peer} first.")
         return
 
+    # 1. Enviar com a chave atual (antes de qualquer rotação)
     ciphertext_hex = encrypt_message(key, plaintext)
-    send_json(sock, {
-        "type": "message",
-        "to": peer,
-        "text": ciphertext_hex,   # opaque blob; server cannot read this
-    })
+    send_json(sock, {"type": "message", "to": peer, "text": ciphertext_hex})
 
+    # 2. Incrementar contador
+    _message_counts[peer] = _message_counts.get(peer, 0) + 1
+
+    # 3. Verificar se é altura de rodar
+    if _message_counts[peer] >= KEY_ROTATION_THRESHOLD:
+        _message_counts[peer] = 0
+        _rotate_key(sock, peer)
+        
+        
+def _rotate_key(sock: socket.socket, peer: str) -> None:
+    """Gera um novo par de chaves e reinicia o handshake com o peer."""
+    global _private_key
+    _private_key, pub_bytes = generate_x25519_keypair()
+    send_json(sock, {
+        "type": "publish_key",
+        "public_key": public_bytes_to_hex(pub_bytes),
+    })
+    
+    do_handshake(sock, peer)
+    print(f"\n  [CRYPTO] Key rotated after {KEY_ROTATION_THRESHOLD} messages with '{peer}'")
 
 def start_client(host: str = HOST, port: int = PORT) -> None:
     try:

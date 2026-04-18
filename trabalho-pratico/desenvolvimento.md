@@ -204,6 +204,9 @@ e produz bytes uniformemente distribuídos — requisito para AES.
 Tem agora as funções de cifrar e decifrar uma mensagem, utiliza a chave pulica e verifica integridade do Selo, se tiver sido mexida a mensagem alterada não é passada
 
 
+
+
+
 ## PLANEAMENTO DO PROJETO:
 
 Phase 1: Basic Communication. Establish a simple TCP connection where the client sends text and the server echoes it back **esta ta feita**
@@ -212,7 +215,7 @@ Phase 2: Identity & Registry. Implement a way for clients to "register" with the
 .
 Phase 3: The Handshake. Implement a protocol where two clients exchange keys through the server to establish a secure channel**tbm ta feita**
 .
-Phase 4: E2EE Messaging. Encrypt messages on the sender's client and decrypt them only on the receiver's client
+Phase 4: E2EE Messaging. Encrypt messages on the sender's client and decrypt them only on the receiver's client **tbm ta feita**
 .
 Phase 5: Persistence & Robustness. Ensure the server can restart without losing user data and handle unexpected client disconnections
 .
@@ -228,8 +231,25 @@ temos outra base de dados para as public keys, com um user associado.
 /connect -> troca de chaves é efetuda
 /msg (depende do /connect de cada lado primeiro. ex: se o bob der "/connect alice" e dps tentar "/msg alice ola" vai falhar pois a alice tem de fazer /connect bob primeiro) **corrigir isto acho eu**
 
+**update: ja ta corrigido**
+
 a fazer: obrigar a atualização da chave depois de x mensagens/ x tempo;
-interface grafica (???)
+interface grafica (???) **se tivermos sem fazer nada (nao vamos tar)**
+
+
+## UPDATE DE CHAVES
+optamos por trocar as chaves com base no numero de mensagens (quando a N'ésima msg for trocada, update de chaves e nova troca)
+podiamos ter feito com base no tempo ou melhor ainda com os dois (o que surgir primeiro numero N de msgs ou tempo T de conexao) mas isso obrigava a implementar sincronização de relogios que pode dar problemas e acrescenta complexidade "desnecessária" ao projeto sendo que a opção que escolhemos já cumpre o quisito "forward secrecy" do enunciado. 
+
+FUNCIONA ASSIM:
+
+1. Enviar mensagem N com chave_antiga
+2. Gerar novo par de chaves efémero
+3. Publicar nova chave pública no servidor  
+4. Pedir chave pública atual do peer → deriva nova session_key
+
+
+
 
 ## COMO RODAR:
 
