@@ -36,6 +36,8 @@ class Database:
           public_keys      — one ephemeral X25519 public key per online user.
                              Replaced on every new login (forward secrecy).
                              Deleted on logout.
+                             Also stores one persistent offline X25519 public key
+                             for receiving encrypted messages while offline.
           offline_messages — messages for offline users, stored until delivery.
         """
         with self._lock:
@@ -47,17 +49,20 @@ class Database:
                 );
 
                 CREATE TABLE IF NOT EXISTS public_keys (
-                    username    TEXT PRIMARY KEY REFERENCES users(username),
-                    public_key  TEXT NOT NULL,
-                    uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    username              TEXT PRIMARY KEY REFERENCES users(username),
+                    public_key            TEXT NOT NULL,
+                    uploaded_at           TEXT NOT NULL DEFAULT (datetime('now')),
+                    offline_public_key    TEXT,
+                    offline_uploaded_at   TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS offline_messages (
-                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                    recipient       TEXT NOT NULL REFERENCES users(username),
-                    sender          TEXT NOT NULL REFERENCES users(username),
-                    ciphertext_hex  TEXT NOT NULL,
-                    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+                    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recipient               TEXT NOT NULL REFERENCES users(username),
+                    sender                  TEXT NOT NULL REFERENCES users(username),
+                    ciphertext_hex          TEXT NOT NULL,
+                    sender_offline_public_key TEXT,
+                    created_at              TEXT NOT NULL DEFAULT (datetime('now'))
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_offline_recipient 
@@ -151,11 +156,53 @@ class Database:
             )
             self._conn.commit()
 
+    def store_offline_public_key(self, username: str, offline_public_key_hex: str) -> None:
+        """
+        Store (or replace) a user's persistent offline X25519 public key.
+        
+        This key is used to encrypt messages when the user is offline.
+        It persists across logins and logouts (unlike the ephemeral session key).
+        
+        Args:
+            username: The username
+            offline_public_key_hex: The hex-encoded X25519 public key
+        """
+        with self._lock:
+            self._conn.execute(
+                """UPDATE public_keys 
+                   SET offline_public_key = ?, offline_uploaded_at = datetime('now')
+                   WHERE username = ?""",
+                (offline_public_key_hex, username),
+            )
+            self._conn.commit()
+
+    def get_offline_public_key(self, username: str) -> str | None:
+        """
+        Return the hex-encoded offline public key for a user, or None if not set.
+        
+        Args:
+            username: The username
+            
+        Returns:
+            Hex-encoded X25519 public key, or None
+        """
+        row = self._conn.execute(
+            "SELECT offline_public_key FROM public_keys WHERE username = ?",
+            (username,),
+        ).fetchone()
+        return row["offline_public_key"] if row and row["offline_public_key"] else None
+
     # -------------------------------------------------------------------------
     # Offline message management
     # -------------------------------------------------------------------------
 
-    def store_offline_message(self, recipient: str, sender: str, ciphertext_hex: str) -> None:
+    def store_offline_message(
+        self, 
+        recipient: str, 
+        sender: str, 
+        ciphertext_hex: str,
+        sender_offline_public_key: str | None = None
+    ) -> None:
         """
         Store an encrypted message for delivery when the recipient logs in.
         
@@ -163,13 +210,15 @@ class Database:
             recipient: The username who should receive this message
             sender: The username who sent this message
             ciphertext_hex: The encrypted message (hex-encoded, AES-256-GCM)
+            sender_offline_public_key: The sender's persistent offline public key (hex)
+                                      Allows recipient to derive the decryption key
         """
         with self._lock:
             self._conn.execute(
                 """INSERT INTO offline_messages 
-                   (recipient, sender, ciphertext_hex, created_at) 
-                   VALUES (?, ?, ?, datetime('now'))""",
-                (recipient, sender, ciphertext_hex),
+                   (recipient, sender, ciphertext_hex, sender_offline_public_key, created_at) 
+                   VALUES (?, ?, ?, ?, datetime('now'))""",
+                (recipient, sender, ciphertext_hex, sender_offline_public_key),
             )
             self._conn.commit()
 
@@ -181,11 +230,11 @@ class Database:
             recipient: The username to fetch messages for
             
         Returns:
-            List of dicts with keys: sender, ciphertext_hex, created_at
+            List of dicts with keys: sender, ciphertext_hex, sender_offline_public_key, created_at
         """
         with self._lock:
             rows = self._conn.execute(
-                """SELECT sender, ciphertext_hex, created_at 
+                """SELECT sender, ciphertext_hex, sender_offline_public_key, created_at 
                    FROM offline_messages 
                    WHERE recipient = ? 
                    ORDER BY created_at ASC""",
