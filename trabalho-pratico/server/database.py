@@ -32,10 +32,11 @@ class Database:
         Create tables if they don't already exist (idempotent).
 
         Schema:
-          users        — credentials; username is the primary key.
-          public_keys  — one ephemeral X25519 public key per online user.
-                         Replaced on every new login (forward secrecy).
-                         Deleted on logout.
+          users            — credentials; username is the primary key.
+          public_keys      — one ephemeral X25519 public key per online user.
+                             Replaced on every new login (forward secrecy).
+                             Deleted on logout.
+          offline_messages — messages for offline users, stored until delivery.
         """
         with self._lock:
             self._conn.executescript("""
@@ -50,6 +51,17 @@ class Database:
                     public_key  TEXT NOT NULL,
                     uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
                 );
+
+                CREATE TABLE IF NOT EXISTS offline_messages (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recipient       TEXT NOT NULL REFERENCES users(username),
+                    sender          TEXT NOT NULL REFERENCES users(username),
+                    ciphertext_hex  TEXT NOT NULL,
+                    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_offline_recipient 
+                ON offline_messages(recipient);
             """)
             self._conn.commit()
 
@@ -138,6 +150,78 @@ class Database:
                 "DELETE FROM public_keys WHERE username = ?", (username,)
             )
             self._conn.commit()
+
+    # -------------------------------------------------------------------------
+    # Offline message management
+    # -------------------------------------------------------------------------
+
+    def store_offline_message(self, recipient: str, sender: str, ciphertext_hex: str) -> None:
+        """
+        Store an encrypted message for delivery when the recipient logs in.
+        
+        Args:
+            recipient: The username who should receive this message
+            sender: The username who sent this message
+            ciphertext_hex: The encrypted message (hex-encoded, AES-256-GCM)
+        """
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO offline_messages 
+                   (recipient, sender, ciphertext_hex, created_at) 
+                   VALUES (?, ?, ?, datetime('now'))""",
+                (recipient, sender, ciphertext_hex),
+            )
+            self._conn.commit()
+
+    def get_offline_messages(self, recipient: str) -> list[dict]:
+        """
+        Retrieve all pending offline messages for a user, ordered by time.
+        
+        Args:
+            recipient: The username to fetch messages for
+            
+        Returns:
+            List of dicts with keys: sender, ciphertext_hex, created_at
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT sender, ciphertext_hex, created_at 
+                   FROM offline_messages 
+                   WHERE recipient = ? 
+                   ORDER BY created_at ASC""",
+                (recipient,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def delete_offline_messages(self, recipient: str) -> None:
+        """
+        Delete all offline messages for a user (after delivery on login).
+        
+        Args:
+            recipient: The username whose offline messages should be deleted
+        """
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM offline_messages WHERE recipient = ?",
+                (recipient,),
+            )
+            self._conn.commit()
+
+    def count_offline_messages(self, recipient: str) -> int:
+        """
+        Count the number of pending offline messages for a user.
+        
+        Args:
+            recipient: The username to count messages for
+            
+        Returns:
+            Number of offline messages (0 if none)
+        """
+        row = self._conn.execute(
+            "SELECT COUNT(*) as cnt FROM offline_messages WHERE recipient = ?",
+            (recipient,),
+        ).fetchone()
+        return row["cnt"]
 
     def close(self) -> None:
         self._conn.close()
