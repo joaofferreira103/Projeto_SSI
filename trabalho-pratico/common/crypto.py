@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
 )
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
@@ -162,3 +163,149 @@ def verify_password(password: str, stored: str) -> bool:
         return True
     except InvalidKey:
         return False
+
+
+# Messagens offline 
+
+
+def generate_offline_keypair() -> tuple[X25519PrivateKey, bytes]:
+    """
+    Generate a persistent X25519 key pair for offline messaging.
+    
+    This is semantically identical to generate_x25519_keypair(), but intended
+    to be generated once per user and stored (encrypted) locally.
+    
+    Returns:
+        (private_key, public_key_bytes) — same format as ephemeral keypair.
+    """
+    return generate_x25519_keypair()
+
+
+def encrypt_offline_key(password: str, private_key: X25519PrivateKey, username: str) -> str:
+    """
+    Encrypt an offline private key with a password for local storage.
+    
+    The offline key is derived from the user's password and username,
+    allowing the user to recover it as long as they remember their password
+    and username.
+    
+    Args:
+        password: User's login password
+        private_key: X25519PrivateKey to encrypt
+        username: Username (used as deterministic salt for PBKDF2)
+    
+    Returns:
+        "salt_hex:nonce_hex:ciphertext_hex" for local storage.
+    
+    Raises:
+        ValueError: if serialization fails
+    """
+    # Extract raw 32-byte private key
+    priv_bytes = private_key.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    
+    # Deterministic PBKDF2 salt: SHA256(username)[:16]
+    # This ensures same password+username always produces same master key
+    salt_hash = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    salt_hash.update(username.encode("utf-8"))
+    pbkdf2_salt = salt_hash.finalize()[:16]
+    
+    # Derive 32-byte master key via PBKDF2-SHA256
+    kdf = PBKDF2(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=pbkdf2_salt,
+        iterations=100000,
+        backend=default_backend(),
+    )
+    master_key = kdf.derive(password.encode("utf-8"))
+    
+    # Encrypt private key with AES-256-GCM
+    nonce = os.urandom(12)
+    aesgcm = AESGCM(master_key)
+    ciphertext = aesgcm.encrypt(nonce, priv_bytes, None)
+    
+    # Return as hex-encoded triplet
+    return f"{pbkdf2_salt.hex()}:{nonce.hex()}:{ciphertext.hex()}"
+
+
+def decrypt_offline_key(password: str, encrypted_blob: str, username: str) -> X25519PrivateKey:
+    """
+    Decrypt an offline private key from local storage.
+    
+    Args:
+        password: User's login password
+        encrypted_blob: "salt_hex:nonce_hex:ciphertext_hex" from storage
+        username: Username (must match the one used during encryption)
+    
+    Returns:
+        X25519PrivateKey
+    
+    Raises:
+        ValueError: if blob format is invalid or username doesn't match
+        InvalidTag: if password is wrong or blob is tampered
+    """
+    try:
+        parts = encrypted_blob.split(":")
+        if len(parts) != 3:
+            raise ValueError("Invalid encrypted blob format: expected 3 parts")
+        pbkdf2_salt = bytes.fromhex(parts[0])
+        nonce = bytes.fromhex(parts[1])
+        ciphertext = bytes.fromhex(parts[2])
+    except (ValueError, AttributeError) as e:
+        raise ValueError(f"Failed to parse encrypted blob: {e}")
+    
+    # Verify salt matches username
+    expected_salt_hash = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    expected_salt_hash.update(username.encode("utf-8"))
+    expected_salt = expected_salt_hash.finalize()[:16]
+    
+    if pbkdf2_salt != expected_salt:
+        raise ValueError("Username mismatch: this offline key belongs to a different user")
+    
+    # Derive master key
+    kdf = PBKDF2(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=pbkdf2_salt,
+        iterations=100000,
+        backend=default_backend(),
+    )
+    master_key = kdf.derive(password.encode("utf-8"))
+    
+    # Decrypt private key (raises InvalidTag if password wrong)
+    aesgcm = AESGCM(master_key)
+    priv_bytes = aesgcm.decrypt(nonce, ciphertext, None)
+    
+    # Convert back to X25519PrivateKey
+    return X25519PrivateKey.from_private_bytes(priv_bytes)
+
+
+def derive_offline_shared_secret(
+    private_key: X25519PrivateKey,
+    peer_public_bytes: bytes,
+) -> bytes:
+    """
+    Perform X25519 ECDH with offline key pair to derive shared secret.
+    
+    This is identical to derive_shared_secret() but uses a different
+    HKDF info string to ensure offline secrets are distinct from session secrets.
+    
+    Args:
+        private_key: User's offline X25519PrivateKey
+        peer_public_bytes: Peer's offline public key (32 bytes)
+    
+    Returns:
+        32-byte shared secret suitable as an AES-256-GCM key.
+    
+    Raises:
+        ValueError: if peer_public_bytes is invalid format
+    """
+    return derive_shared_secret(
+        private_key,
+        peer_public_bytes,
+        info=b"chat-e2ee-offline-v1",
+    )
