@@ -19,9 +19,15 @@ from common.crypto import (
     hex_to_public_bytes,
     encrypt_message,
     decrypt_message,
+    generate_offline_keypair,
+    encrypt_offline_key,
+    decrypt_offline_key,
+    derive_offline_shared_secret,
 )
 
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import serialization
+import json
 
 HOST = "127.0.0.1"
 PORT = 9000
@@ -29,8 +35,14 @@ PORT = 9000
 # Ephemeral private key for this session
 _private_key = None
 
+# Offline private key (persistent, loaded from encrypted file)
+_offline_private_key = None
+
 # Derived AES-256-GCM keys per peer: {username: bytes}
 _session_keys: dict[str, bytes] = {}
+
+# Offline shared secrets per peer: {username: bytes}
+_offline_session_keys: dict[str, bytes] = {}
 
 # Who we're currently "talking to"
 _current_peer: str | None = None
@@ -41,19 +53,117 @@ KEY_ROTATION_THRESHOLD = 50  # rotaciona a cada 50 mensagens enviadas
 
 
 # ---------------------------------------------------------------------------
+# Offline key file management
+# ---------------------------------------------------------------------------
+
+def _get_offline_key_path(username: str) -> str:
+    """
+    Return the path to the encrypted offline key file.
+    Creates ~/.chat_offline_keys directory if needed.
+    """
+    offline_dir = os.path.expanduser("~/.chat_offline_keys")
+    os.makedirs(offline_dir, exist_ok=True)
+    return os.path.join(offline_dir, f"{username}.key")
+
+
+def _save_offline_key_to_file(username: str, password: str, encrypted_blob: str) -> None:
+    """
+    Save the encrypted offline key blob to a file.
+    
+    Args:
+        username: Username
+        password: (Not used for saving, but kept for interface consistency)
+        encrypted_blob: Output from encrypt_offline_key()
+    """
+    path = _get_offline_key_path(username)
+    # Store as JSON for robustness
+    data = {"username": username, "encrypted_key": encrypted_blob}
+    with open(path, "w") as f:
+        json.dump(data, f)
+    # Set restrictive permissions
+    os.chmod(path, 0o600)
+
+
+def _load_offline_key_from_file(username: str, password: str):
+    """
+    Load and decrypt the offline key from file.
+    
+    Args:
+        username: Username
+        password: Password for decryption
+        
+    Returns:
+        X25519PrivateKey
+        
+    Raises:
+        FileNotFoundError: if file doesn't exist
+        ValueError: if format is invalid or username mismatch
+        InvalidTag: if password is wrong
+    """
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    
+    path = _get_offline_key_path(username)
+    with open(path, "r") as f:
+        data = json.load(f)
+    
+    encrypted_blob = data.get("encrypted_key")
+    if not encrypted_blob:
+        raise ValueError("Invalid offline key file format")
+    
+    return decrypt_offline_key(password, encrypted_blob, username)
+
+
+def _ensure_offline_key_exists(username: str, password: str):
+    """
+    Load offline key if exists, or generate and save a new one.
+    
+    Returns:
+        X25519PrivateKey for offline messaging
+    """
+    try:
+        # Try to load existing key
+        private_key = _load_offline_key_from_file(username, password)
+        print("  [CRYPTO] Offline key loaded from file ✓")
+        return private_key
+    except FileNotFoundError:
+        # Generate new offline key
+        print("  [CRYPTO] Generating offline key for first time...")
+        private_key, pub_bytes = generate_offline_keypair()
+        
+        # Encrypt and save
+        encrypted_blob = encrypt_offline_key(password, private_key, username)
+        _save_offline_key_to_file(username, password, encrypted_blob)
+        
+        print("  [CRYPTO] Offline key saved to ~/.chat_offline_keys/ ✓")
+        return private_key
+
+
+# ---------------------------------------------------------------------------
 # Key exchange helpers
 # ---------------------------------------------------------------------------
 
 def publish_my_key(sock: socket.socket) -> None:
     """
     Called immediately after a successful login.
+    Publishes both ephemeral session key AND persistent offline key.
     """
-    global _private_key
+    global _private_key, _offline_private_key
     _private_key, pub_bytes = generate_x25519_keypair()
     send_json(sock, {
         "type": "publish_key",
         "public_key": public_bytes_to_hex(pub_bytes),
     })
+    
+    # Also publish offline key if we have it
+    if _offline_private_key:
+        offline_pub_bytes = _offline_private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        send_json(sock, {
+            "type": "publish_offline_key",
+            "offline_public_key": public_bytes_to_hex(offline_pub_bytes),
+        })
 
 
 def do_handshake(sock: socket.socket, peer_username: str) -> None:
@@ -63,6 +173,14 @@ def do_handshake(sock: socket.socket, peer_username: str) -> None:
     server replies asynchronously.
     """
     send_json(sock, {"type": "get_key", "username": peer_username})
+
+
+def get_peer_offline_public_key(sock: socket.socket, peer_username: str) -> None:
+    """
+    Request a peer's offline public key from the server.
+    The server will respond with offline_key_response containing the key.
+    """
+    send_json(sock, {"type": "get_offline_key", "username": peer_username})
 
 
 def _handle_key_response(msg: dict) -> None:
@@ -85,6 +203,33 @@ def _handle_key_response(msg: dict) -> None:
 
     print(f"\n  [CRYPTO] Secure channel established with '{peer}' ✓")
     print(f"  [CRYPTO] You can now use: /msg {peer} <text>")
+    print("  > ", end="", flush=True)
+
+
+def _handle_offline_key_response(msg: dict) -> None:
+    """
+    Called by the receive loop when an offline_key_response arrives.
+    Derives and stores the offline shared secret for the peer.
+    """
+    global _offline_session_keys, _offline_private_key
+
+    peer = msg.get("username")
+    pub_hex = msg.get("offline_public_key")
+    if not peer or not pub_hex:
+        print(f"\n  ⚠  Failed to get offline key for '{peer}'")
+        print("  > ", end="", flush=True)
+        return
+
+    if not _offline_private_key:
+        print(f"\n  ⚠  No offline key loaded yet")
+        print("  > ", end="", flush=True)
+        return
+
+    peer_pub_bytes = hex_to_public_bytes(pub_hex)
+    secret = derive_offline_shared_secret(_offline_private_key, peer_pub_bytes)
+    _offline_session_keys[peer] = secret
+
+    print(f"\n  [CRYPTO] Offline channel ready with '{peer}' ✓")
     print("  > ", end="", flush=True)
 
 
@@ -249,7 +394,9 @@ def chat_loop(sock: socket.socket, username: str) -> None:
                     print("  Usage: /connect <username>")
                 else:
                     do_handshake(sock, peer)
-                continue  
+                    # Also request offline key for backup
+                    get_peer_offline_public_key(sock, peer)
+                continue
 
             # ------------------------------------------------------------------
             # /msg <peer> <text>  — send encrypted message to a specific peer
@@ -276,22 +423,45 @@ def chat_loop(sock: socket.socket, username: str) -> None:
 
 
 def _send_encrypted(sock: socket.socket, peer: str, plaintext: str) -> None:
+    """
+    Send encrypted message using session key if available, else offline key.
+    If offline key not yet cached, request it from server.
+    """
+    # Try session key first (online)
     key = _session_keys.get(peer)
-    if key is None:
-        print(f"  [ERROR] No session key for '{peer}'. Run /connect {peer} first.")
+    if key is not None:
+        ciphertext_hex = encrypt_message(key, plaintext)
+        send_json(sock, {"type": "message", "to": peer, "text": ciphertext_hex})
+        _message_counts[peer] = _message_counts.get(peer, 0) + 1
+        
+        # Check if we need to rotate
+        if _message_counts[peer] >= KEY_ROTATION_THRESHOLD:
+            _message_counts[peer] = 0
+            _rotate_key(sock, peer)
         return
-
-    # 1. Enviar com a chave atual (antes de qualquer rotação)
-    ciphertext_hex = encrypt_message(key, plaintext)
-    send_json(sock, {"type": "message", "to": peer, "text": ciphertext_hex})
-
-    # 2. Incrementar contador
-    _message_counts[peer] = _message_counts.get(peer, 0) + 1
-
-    # 3. Verificar se é altura de rodar
-    if _message_counts[peer] >= KEY_ROTATION_THRESHOLD:
-        _message_counts[peer] = 0
-        _rotate_key(sock, peer)
+    
+    # Try offline key (if cached)
+    offline_key = _offline_session_keys.get(peer)
+    if offline_key is not None:
+        ciphertext_hex = encrypt_message(offline_key, plaintext)
+        
+        # Include our offline public key so recipient can decrypt
+        offline_pub_bytes = _offline_private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        
+        send_json(sock, {
+            "type": "message",
+            "to": peer,
+            "text": ciphertext_hex,
+            "offline_public_key": public_bytes_to_hex(offline_pub_bytes),
+        })
+        return
+    
+    # No session key and no offline key — request peer's offline key
+    print(f"  [INFO] No session with '{peer}'. Requesting offline key...")
+    get_peer_offline_public_key(sock, peer)
         
         
 def _rotate_key(sock: socket.socket, peer: str) -> None:
