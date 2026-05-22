@@ -254,18 +254,31 @@ def receive_loop(sock: socket.socket, stop_event: threading.Event) -> None:
             if msg_type == "message":
                 sender = msg.get("from", "?")
                 ciphertext_hex = msg.get("text", "")
+                sender_offline_public_key = msg.get("sender_offline_public_key")
 
+                # Try session key first (online message)
                 key = _session_keys.get(sender)
-                if key is None:
-                    
-                    print(f"\n  ⚠  {sender} [NO SESSION KEY — run /connect {sender} first]: {ciphertext_hex}")
-                else:
+                if key is not None:
                     try:
                         plaintext = decrypt_message(key, ciphertext_hex)
                         print(f"\n  {sender}: {plaintext}")
                     except (InvalidTag, ValueError) as e:
-                        
                         print(f"\n  ⚠  {sender} [DECRYPTION FAILED — message discarded]: {e}")
+                else:
+                    # Try offline key if sender provided their offline public key
+                    if sender_offline_public_key and _offline_private_key:
+                        try:
+                            peer_pub_bytes = hex_to_public_bytes(sender_offline_public_key)
+                            offline_key = derive_offline_shared_secret(
+                                _offline_private_key,
+                                peer_pub_bytes
+                            )
+                            plaintext = decrypt_message(offline_key, ciphertext_hex)
+                            print(f"\n  {sender} (offline): {plaintext}")
+                        except (InvalidTag, ValueError) as e:
+                            print(f"\n  ⚠  {sender} [OFFLINE MSG DECRYPTION FAILED]: {e}")
+                    else:
+                        print(f"\n  ⚠  {sender} [NO SESSION KEY — run /connect {sender} first]: {ciphertext_hex}")
 
                 print("  > ", end="", flush=True)
 
@@ -282,6 +295,9 @@ def receive_loop(sock: socket.socket, stop_event: threading.Event) -> None:
 
             elif msg_type == "key_response":
                 _handle_key_response(msg)
+
+            elif msg_type == "offline_key_response":
+                _handle_offline_key_response(msg)
 
         except ConnectionError:
             if not stop_event.is_set():
@@ -304,6 +320,8 @@ def auth_flow(sock: socket.socket) -> str | None:
     Synchronous register/login loop.  Returns the logged-in username or None.
 
     """
+    global _offline_private_key
+    
     print("\n  ╔════════════════════════╗")
     print("  ║     Chat E2EE v0.3     ║")
     print("  ╚════════════════════════╝\n")
@@ -340,6 +358,14 @@ def auth_flow(sock: socket.socket) -> str | None:
             print(f"  [{response.get('type', '?').upper()}] {response.get('message', '')}\n")
             if response.get("type") == "ok":
                 username = response.get("username", username)
+                
+                # Load or generate offline key
+                try:
+                    _offline_private_key = _ensure_offline_key_exists(username, password)
+                except Exception as e:
+                    print(f"  [ERROR] Failed to manage offline key: {e}")
+                    return None
+                
                 publish_my_key(sock)
                 return username
 
