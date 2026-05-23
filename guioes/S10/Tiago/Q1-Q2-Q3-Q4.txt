@@ -1,0 +1,54 @@
+Questão 1
+
+Resposta:
+As linhas ¿ e ¡ têm como objetivo extrair os tokens de segurança do Elgg, nomeadamente o `__elgg_ts` (timestamp) e o `__elgg_token`.
+
+Estas linhas são fundamentais porque o Elgg utiliza uma contra-medida de segurança chamada **Anti-CSRF (Cross-Site Request Forgery) Tokens**. O servidor exige que qualquer pedido que altere dados (como adicionar um amigo) inclua estes tokens para garantir que a ação foi iniciada genuinamente pelo utilizador a partir de uma página legítima do site. Como o nosso ataque é um script que corre "por baixo da mesa", ele precisa de "roubar" estes tokens dinamicamente do objeto `elgg.security.token` do browser da vítima. Sem estes tokens, o servidor rejeitaria o pedido do verme por falta de autenticidade.
+
+
+
+---
+Questão 2
+
+Resposta:
+Sim, seria possível, mas tornaria a injeção do código muito mais difícil.
+
+O modo **Editor** (como o CKEditor) é um editor visual "What You See Is What You Get" (WYSIWYG). Ele tende a converter caracteres especiais de código em entidades HTML (por exemplo, transforma `<` em `&lt;` e `>` em `&gt;`). Se isso acontecer, o browser da vítima interpretará o código como **texto simples** e não como um script executável, fazendo com que o ataque falhe.
+
+Para contornar isto num cenário onde só existe o modo Editor, o atacante teria de:
+1. Tentar fechar as tags que o editor abre automaticamente.
+2. Usar técnicas de *obfuscação* ou codificação de caracteres.
+3. Se o editor permitisse, tentar inserir o script através de outros atributos (como `onmouseover` ou `onerror`) que o filtro do editor pudesse ter esquecido de bloquear.
+
+
+
+---
+Questão 3
+
+Resposta:
+
+Este ataque é um Stored XSS (XSS Armazenado).
+Porque o código malicioso foi injetado e guardado permanentemente na base de dados do servidor (no perfil do Samy). Ao contrário do Reflected XSS, a vítima não precisa de clicar num link externo; o ataque ocorre automaticamente assim que qualquer utilizador visualiza a página legítima do perfil, pois o servidor "serve" o script malicioso juntamente com os dados do utilizador.
+
+
+
+---
+Questão 4
+
+Resposta:
+
+
+
+A diferença fundamental entre os três websites reside no rigor das diretivas do cabeçalho Content Security Policy (CSP) configuradas em cada servidor. Embora os três sites partilhem a mesma vulnerabilidade de código que permite a injeção de scripts (XSS), o browser comporta-se de forma diferente em cada caso devido às regras de segurança impostas:
+
+   - [www.example32a.com](https://www.google.com/search?q=https://www.example32a.com) (Política Inexistente ou Permissiva):**
+    Neste cenário, o ataque de XSS é bem-sucedido. O browser executa o script injetado (como o `alert()`) sem qualquer restrição. Isto acontece porque o site não define um cabeçalho CSP ou utiliza a diretiva `unsafe-inline`, permitindo que qualquer código inserido diretamente no HTML seja interpretado e corrido.
+
+   - [www.example32b.com](https://www.google.com/search?q=https://www.example32b.com) (Restrição de Origem):
+    Neste site, o comportamento começa a mudar. O CSP está configurado para permitir scripts apenas de origens confiáveis (geralmente o próprio domínio, através da diretiva `script-src 'self'`). Se o ataque XSS tentar carregar um ficheiro JavaScript externo de um servidor de um atacante, o browser irá bloqueá-lo. No entanto, se o código for injetado diretamente no corpo do HTML (inline), poderá ainda ser executado caso a política não bloqueie especificamente scripts inline.
+
+   - [www.example32c.com](https://www.google.com/search?q=https://www.example32c.com) (Bloqueio de Scripts Inline e Fontes Não Autorizadas):
+    Este é o cenário mais seguro, onde o ataque falha completamente. A política CSP deste site é restritiva ao ponto de proibir a execução de qualquer script inline (não permitindo a diretiva `unsafe-inline`). Mesmo que o atacante consiga injetar o código `<script>alert(1)</script>` na página, o browser identifica que aquele bloco de código não possui um código de autorização (*nonce* ou *hash*) ou que viola a política de "apenas ficheiros externos confiáveis". O browser bloqueia a execução e gera um erro na consola de programador, neutralizando o ataque mesmo havendo uma vulnerabilidade no servidor.
+
+Explicação com base na configuração:
+A eficácia do CSP não depende de corrigir o erro de programação no site, mas sim de criar uma "lista branca" no browser. O Site A falha por não ter lista; o Site B falha por ser demasiado vago na lista; e o Site C é bem-sucedido na defesa porque exige que todos os scripts sejam carregados de ficheiros verificados, impedindo que qualquer código injetado pelo utilizador (como o Samy Worm) ganhe vida.

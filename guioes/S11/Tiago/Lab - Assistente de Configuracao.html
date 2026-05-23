@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laboratório de Segurança de Software: Assistente de Configuração</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #212121;
+    --muted: #666;
+    --accent: #0066cc;
+    --accent-bg: #e8f1fa;
+    --border: #d8d8d8;
+    --code-bg: #f4f4f4;
+    --code-fg: #1b1b1b;
+    --ok: #1a7f37;
+    --warn: #b85c00;
+    --warn-bg: #fff4e5;
+    --radius: 6px;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 2rem 1rem 4rem;
+    line-height: 1.55;
+  }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 0.9em; }
+  h1 { margin-top: 0; font-size: 1.75rem; color: var(--accent); }
+  h2 { margin-top: 2rem; font-size: 1.25rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { margin-top: 1.5rem; font-size: 1.05rem; }
+  .subtitle { color: var(--muted); margin-top: -0.3rem; }
+  fieldset {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin: 1rem 0;
+    padding: 1rem 1.25rem;
+    background: white;
+  }
+  legend { padding: 0 0.5rem; font-weight: 600; }
+  label { display: block; margin: 0.35rem 0; cursor: pointer; }
+  input[type="radio"], input[type="checkbox"] { margin-right: 0.5rem; vertical-align: middle; }
+  .detected {
+    display: inline-block;
+    margin-left: 0.5rem;
+    background: var(--accent-bg);
+    color: var(--accent);
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.1rem 0.55rem;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    vertical-align: middle;
+  }
+  .note { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; }
+  .note code { background: var(--code-bg); padding: 0 0.3rem; border-radius: 3px; }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 0.9rem 1rem;
+    border-radius: var(--radius);
+    overflow-x: auto;
+    margin: 0.7rem 0;
+    white-space: pre;
+  }
+  p code, li code { background: var(--code-bg); padding: 0 0.3rem; border-radius: 3px; }
+  .path-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin-top: 1rem;
+  }
+  .path-card h2 { margin-top: 0; border: 0; color: var(--accent); padding-bottom: 0; }
+  .path-card ol { padding-left: 1.5rem; }
+  .path-card li { margin: 0.6rem 0; }
+  .callout {
+    background: var(--accent-bg);
+    border-left: 4px solid var(--accent);
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    margin: 1rem 0;
+    font-size: 0.95rem;
+  }
+  .callout.warn { background: var(--warn-bg); border-left-color: var(--warn); }
+  .hidden { display: none !important; }
+  footer {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    background: var(--accent-bg);
+    border-left: 4px solid var(--accent);
+    padding: 1rem 1.1rem;
+    border-radius: var(--radius);
+    margin-top: 3rem;
+    color: var(--fg);
+    font-size: 0.95rem;
+  }
+  footer p { margin: 0; }
+  footer .icon {
+    flex-shrink: 0;
+    width: 1.5em;
+    height: 1.5em;
+    color: var(--accent);
+    margin-top: 0.15em;
+  }
+  footer .doc-ref {
+    font-weight: 600;
+    color: var(--accent);
+  }
+  header.masthead {
+    color: var(--muted);
+    font-size: 0.85rem;
+    line-height: 1.4;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1rem;
+  }
+  header.masthead p { margin: 0.4rem 0; }
+  header.masthead .course-line {
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--accent);
+  }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <p>
+    <span class="course-line">Segurança de Sistemas Informáticos, 2025-26</span><br>
+    Licenciatura em Engenharia Informática, Universidade do Minho
+  </p>
+  <p>
+    Vítor Francisco Fonte<br>
+    2026-04-18
+  </p>
+</header>
+
+<h1>Laboratório de Segurança de Software: Assistente de Configuração</h1>
+<p class="subtitle">Configuração do ambiente para a <b>Semana 11: Vulnerabilidades de Segurança de Memória</b>. Responda às perguntas abaixo e os passos de configuração adequados ao seu caso aparecerão à medida que responde.</p>
+
+<form id="wizard">
+  <fieldset>
+    <legend>Sistema operativo</legend>
+    <label><input type="radio" name="os" value="windows"> Windows 10 ou 11</label>
+    <label><input type="radio" name="os" value="macos"> macOS</label>
+    <label><input type="radio" name="os" value="linux"> Linux</label>
+    <label><input type="radio" name="os" value="other"> Outro</label>
+    <div id="os-detected" class="note"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Família do CPU</legend>
+    <label><input type="radio" name="arch" value="x86_64"> x86-64 (Intel ou AMD)</label>
+    <label><input type="radio" name="arch" value="arm64"> ARM (Apple Silicon M-series, Snapdragon X, Raspberry Pi, Asahi Linux, …)</label>
+    <div id="arch-detected" class="note"></div>
+    <div class="note">Num Mac Apple Silicon com um <i>browser</i> traduzido pelo Rosetta, esta deteção pode enganar e reportar x86-64. Em caso de dúvida, abra um Terminal e execute <code>uname -m</code>: <code>arm64</code> significa Apple Silicon.</div>
+  </fieldset>
+
+  <fieldset id="haveUbuntuFieldset">
+    <legend>Ubuntu existente</legend>
+    <label><input type="checkbox" name="haveUbuntu"> Já tenho uma <i>shell</i> Ubuntu 22.04 x86-64 que posso abrir (instalação nativa, distribuição WSL2 ou VM pré-existente). <code>uname -m</code> dentro dela devolve <code>x86_64</code>.</label>
+  </fieldset>
+
+  <fieldset id="webLabFieldset">
+    <legend>Trabalho anterior</legend>
+    <label><input type="checkbox" name="webLab"> Já completei o trabalho de Segurança Web nesta mesma máquina (Docker Desktop já está instalado).</label>
+  </fieldset>
+
+  <fieldset id="gdbFieldset">
+    <legend>Compromisso em Apple Silicon</legend>
+    <label><input type="checkbox" name="skipGdb"> Prefiro a configuração Docker mais leve (Caminho 4) e estou disposto(a) a usar a alternativa de análise estática ao Exercício 2.</label>
+    <div class="note">Note que a recomendação por defeito para Apple Silicon é o <b>Caminho 5 (UTM)</b>, que executa um <i>kernel</i> Linux x86-64 totalmente emulado e suporta GDB em modo interativo como o enunciado descreve. O Exercício 2 do trabalho assenta numa sessão interativa de GDB que não funciona sob Docker com Rosetta; uma alternativa de análise estática está incluída no enunciado para alunos que marquem esta opção e sigam o caminho Docker.</div>
+  </fieldset>
+</form>
+
+<section id="result" aria-live="polite"></section>
+
+<footer>
+  <svg class="icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" aria-hidden="true">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>
+  </svg>
+  <p>A referência completa, a resolução de problemas e os percursos detalhados dos caminhos baseados em VM residem em <span class="doc-ref">Lab - Guia de Configuração do Ambiente</span>, junto a este ficheiro. Este assistente é uma camada de conveniência sobre esse documento.</p>
+</footer>
+
+<script>
+(async function () {
+  const qs  = s => document.querySelector(s);
+
+  // ---- 1. Deteção automática de sistema operativo e arquitetura ----------
+
+  const detected = { os: null, arch: null };
+  const ua = navigator.userAgent || '';
+  if (/Windows/i.test(ua))                   detected.os = 'windows';
+  else if (/Mac|iPhone|iPad|iPod/i.test(ua)) detected.os = 'macos';
+  else if (/Linux/i.test(ua))                detected.os = 'linux';
+
+  if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+    try {
+      const hints = await navigator.userAgentData.getHighEntropyValues(['architecture']);
+      if (hints.architecture === 'arm')      detected.arch = 'arm64';
+      else if (hints.architecture === 'x86') detected.arch = 'x86_64';
+    } catch (_) { /* ignorar */ }
+  }
+
+  const osRadio = document.querySelector(`input[name="os"][value="${detected.os}"]`);
+  if (osRadio) {
+    osRadio.checked = true;
+    qs('#os-detected').innerHTML = '<span class="detected">detetado</span>Altere acima se a deteção estiver errada.';
+  } else {
+    qs('#os-detected').textContent = 'Não foi possível detetar o seu SO automaticamente; escolha a opção correta.';
+  }
+
+  const archRadio = document.querySelector(`input[name="arch"][value="${detected.arch}"]`);
+  if (archRadio) {
+    archRadio.checked = true;
+    qs('#arch-detected').innerHTML = '<span class="detected">detetado</span>Altere acima se a deteção estiver errada.';
+  } else {
+    qs('#arch-detected').textContent = 'O seu browser não expõe a família do CPU (comum em Safari e Firefox). Escolha a opção correta acima.';
+  }
+
+  // ---- 2. Decisão do caminho ----------------------------------------------
+
+  const decide = a => {
+    if (!a.os || !a.arch) return null;
+    if (a.arch === 'arm64') {
+      if (a.os === 'macos') return a.skipGdb ? 'path4' : 'path5';
+      return 'path_arm_other';
+    }
+    if (a.haveUbuntu) return 'path1';
+    if (a.os === 'windows') return a.webLab ? 'path2b' : 'path2';
+    if (a.os === 'macos')   return a.webLab ? 'path3b' : 'path3';
+    if (a.os === 'linux')   return 'path3';
+    return null;
+  };
+
+  // ---- 3. Conteúdo de cada caminho ----------------------------------------
+
+  const compose = `services:
+  lab:
+    image: ubuntu:22.04
+    platform: linux/amd64
+    volumes:
+      - ./work:/root/work
+    working_dir: /root/work
+    command: sleep infinity
+    stdin_open: true
+    tty: true
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp=unconfined`;
+
+  const paths = {
+    path1: () => `
+      <h2>Caminho 1. Ubuntu 22.04 x86-64 já existente</h2>
+      <p>Já tem o ambiente. Instale apenas as ferramentas do trabalho:</p>
+      <pre>sudo apt update
+sudo apt install gcc gdb python3</pre>
+      <p>Verifique:</p>
+      <pre>uname -m          # deve imprimir x86_64
+lsb_release -d    # deve mencionar Ubuntu 22.04</pre>
+    `,
+
+    path2: () => `
+      <h2>Caminho 2. Windows com WSL2</h2>
+      <ol>
+        <li>Abra o <b>PowerShell como Administrador</b> e execute:
+          <pre>wsl --install -d Ubuntu-22.04</pre>
+        </li>
+        <li>Reinicie. O Ubuntu arranca automaticamente no próximo arranque e pede um nome de utilizador e palavra-passe Linux.</li>
+        <li>A partir daí, abra o Ubuntu no menu Iniciar.</li>
+        <li>Instale as ferramentas do trabalho:
+          <pre>sudo apt update
+sudo apt install gcc gdb python3</pre>
+        </li>
+      </ol>
+      <p class="note">Prefere uma VM completa em vez de WSL2? Veja o <b>Caminho 3</b> em <code>Lab - Guia de Configuracao do Ambiente.md</code>.</p>
+    `,
+
+    path2b: () => `
+      <h2>Caminho 2b. Windows com Docker Desktop</h2>
+      <p>No Windows, o Docker Desktop utiliza o WSL2 como <i>kernel</i> Linux de <i>backend</i>, pelo que o <i>container</i> corre num <i>kernel</i> Linux x86-64 genuíno. O GDB em modo interativo funciona exatamente como descrito no enunciado — a limitação do Rosetta do Caminho 4 não se aplica aqui.</p>
+      <ol>
+        <li><b>Salte este passo</b> se já instalou o Docker Desktop para o trabalho de Segurança Web. Caso contrário, descarregue o <b>Docker Desktop for Windows</b> em <a href="https://www.docker.com/products/docker-desktop/">docker.com</a>, execute o <i>installer</i> com as opções por defeito e reinicie se solicitado. Lance o Docker Desktop no menu Iniciar e aguarde até o ícone da baleia na barra de tarefas parar de animar.</li>
+        <li>Abra o <b>Windows Terminal</b> (ou PowerShell) e crie uma pasta para o trabalho e o ficheiro <i>compose</i>:
+          <pre>mkdir ~/ssi-lab/work
+cd ~/ssi-lab</pre>
+          Coloque este conteúdo em <code>docker-compose.yml</code>:
+          <pre>${compose}</pre>
+        </li>
+        <li>Lance o <i>container</i> e abra uma <i>shell</i>:
+          <pre>docker compose up -d
+docker compose exec lab bash</pre>
+        </li>
+        <li>Dentro do <i>container</i> (já é <i>root</i>):
+          <pre>apt update && apt install -y gcc gdb python3</pre>
+        </li>
+      </ol>
+      <p class="note">Este ficheiro <i>compose</i> <b>não</b> é o que usou no trabalho de Segurança Web. Aquele era uma configuração SEED Labs com múltiplos <i>containers</i>; este é uma bancada de trabalho Ubuntu única.</p>
+    `,
+
+    path3: () => `
+      <h2>Caminho 3. Host x86-64 com VirtualBox</h2>
+      <p>Este caminho executa um <i>kernel</i> Linux x86-64 real numa VM e suporta GDB em modo interativo. O percurso completo está no <b>Caminho 3</b> de <code>Lab - Guia de Configuracao do Ambiente.md</code>; lista-resumo:</p>
+      <ol>
+        <li>Instale o VirtualBox (<code>brew install --cask virtualbox</code> num Mac Intel; o <i>installer</i> oficial "Windows hosts" em Windows; <code>sudo apt install virtualbox</code> em Debian/Ubuntu).</li>
+        <li>Descarregue a ISO <b>Ubuntu 22.04 Server amd64</b> (cerca de 2 GB).</li>
+        <li>No VirtualBox crie uma VM: 2 GB de RAM, disco VDI dinâmico de 15 GB, anexe a ISO, e em <b>Rede, Adaptador 1, Redireccionamento de Portas</b> adicione a regra host 2222, guest 22.</li>
+        <li>Instale o Ubuntu Server com as opções por defeito. No ecrã <b>SSH Setup</b>, marque <b>Install OpenSSH server</b>. Este é o elemento mais importante deste caminho: permite dispensar a janela de consola da VM.</li>
+        <li>Após a instalação, retire a ISO e reinicie a VM. De um terminal no seu <i>host</i> execute:
+          <pre>ssh -p 2222 &lt;o-seu-utilizador&gt;@localhost</pre>
+        </li>
+        <li>Dentro da VM:
+          <pre>sudo apt install gcc gdb python3</pre>
+        </li>
+      </ol>
+      <p class="note">O disco virtual de 15 GB é um teto, não o custo real no SSD do <i>host</i>. Uma instalação Ubuntu Server com as ferramentas do trabalho fica em cerca de 5 a 7 GB de uso real.</p>
+    `,
+
+    path3b: () => `
+      <h2>Caminho 3b. Mac Intel com Docker Desktop</h2>
+      <p>Num Mac Intel, o Docker Desktop executa uma VM Linux x86-64 de forma nativa. Sem Rosetta, sem camada de tradução, e o GDB funciona exatamente como num Linux nativo.</p>
+      <ol>
+        <li><b>Salte este passo</b> se já instalou o Docker Desktop para o trabalho de Segurança Web. Caso contrário, instale-o:
+          <pre>brew install --cask docker-desktop
+open -a Docker</pre>
+          Aguarde até o ícone da baleia na barra de menus parar de animar.
+        </li>
+        <li>Crie uma pasta para o trabalho e o ficheiro <i>compose</i>:
+          <pre>mkdir -p ~/ssi-lab/work
+cd ~/ssi-lab</pre>
+          Coloque este conteúdo em <code>docker-compose.yml</code>:
+          <pre>${compose}</pre>
+        </li>
+        <li>Lance o <i>container</i> e abra uma <i>shell</i>:
+          <pre>docker compose up -d
+docker compose exec lab bash</pre>
+        </li>
+        <li>Dentro do <i>container</i> (já é <i>root</i>):
+          <pre>apt update && apt install -y gcc gdb python3</pre>
+        </li>
+      </ol>
+      <p class="note">Este ficheiro <i>compose</i> <b>não</b> é o que usou no trabalho de Segurança Web. Aquele era uma configuração SEED Labs com múltiplos <i>containers</i>; este é uma bancada de trabalho Ubuntu única.</p>
+    `,
+
+    path4: () => `
+      <h2>Caminho 4. Mac Apple Silicon com Docker Desktop e Rosetta</h2>
+      <p>O <i>container</i> corre dentro da VM Linux do Docker Desktop; o Rosetta da Apple traduz as instruções x86-64 para arm64 quase à velocidade nativa.</p>
+      <ol>
+        <li><b>Salte este passo</b> se já instalou o Docker Desktop para o trabalho de Segurança Web. Caso contrário, instale-o:
+          <pre>brew install --cask docker-desktop
+open -a Docker</pre>
+          Complete o <i>onboarding</i> do Docker Desktop.
+        </li>
+        <li>Active o Rosetta (provavelmente não estava activo para o trabalho de Segurança Web). Abra o Docker Desktop &rarr; <b>Settings &rarr; General</b>:
+          <ul>
+            <li>Defina <b>Virtual Machine Manager</b> para <b>Apple Virtualization framework</b>.</li>
+            <li>Marque <b>Use Rosetta for x86_64/amd64 emulation on Apple Silicon</b>.</li>
+            <li>Clique em <b>Apply &amp; restart</b> e aguarde até o ícone da baleia parar de animar.</li>
+          </ul>
+        </li>
+        <li>Crie uma pasta para o trabalho e o ficheiro <i>compose</i>:
+          <pre>mkdir -p ~/ssi-lab/work
+cd ~/ssi-lab</pre>
+          Coloque este conteúdo em <code>docker-compose.yml</code>:
+          <pre>${compose}</pre>
+        </li>
+        <li>Lance o <i>container</i> e abra uma <i>shell</i>:
+          <pre>docker compose up -d
+docker compose exec lab bash</pre>
+        </li>
+        <li>Dentro do <i>container</i>:
+          <pre>apt update && apt install -y gcc gdb python3</pre>
+        </li>
+      </ol>
+      <div class="callout warn"><b>Limitações conhecidas deste caminho.</b> O Rosetta não consegue fazer <code>ptrace</code> dos processos que traduz, pelo que o GDB em modo interativo (breakpoints, <code>info frame</code>, stepping) não funciona. O Rosetta também fixa o código traduzido num endereço base estável, pelo que a aleatorização PIE/ASLR do código do programa aparece suprimida. O enunciado indica o que observar e como contornar as duas situações; se qualquer delas for bloqueante, siga o Caminho 5.</div>
+      <p class="note">Este ficheiro <i>compose</i> <b>não</b> é o que usou no trabalho de Segurança Web.</p>
+    `,
+
+    path5: () => `
+      <h2>Caminho 5. Mac Apple Silicon com UTM (VM x86-64 completa)</h2>
+      <p>O UTM emula um CPU x86-64 em software: mais lento que o Caminho 4 para trabalho limitado por CPU, mas dá-lhe um <i>kernel</i> Linux real com GDB em modo interativo totalmente funcional.</p>
+      <ol>
+        <li>Instale o UTM e mantenha-o atualizado (a interface de <i>Network</i> muda entre versões; validado em <b>UTM 4.7.5</b>):
+          <pre>brew install --cask utm       # primeira vez
+brew upgrade --cask utm       # se já tinha instalado antes</pre>
+          Se instalou o UTM manualmente, use <i>menu UTM, Check for Updates…</i> na própria aplicação.
+        </li>
+        <li>Descarregue a ISO <b>Ubuntu 22.04 Server amd64</b> (NÃO arm64). À data de escrita: <code>ubuntu-22.04.5-live-server-amd64.iso</code> (cerca de 2 GB).</li>
+        <li>No UTM, clique no botão <b>+</b> e escolha <b>Emulate</b>. Percorra o <i>wizard</i> nesta ordem: <b>Hardware</b> (arquitetura <code>x86_64</code>, sistema por omissão, 4096 MB de memória, 2 <i>CPU cores</i>) &rarr; <b>Operating System</b> (escolha Linux; defina <b>Boot ISO Image</b> para a ISO do Ubuntu) &rarr; <b>Storage</b> (20 GB) &rarr; <b>Shared Directory</b> (salte) &rarr; <b>Summary</b>. No ecrã Summary, nomeie a VM como <code>ssi-lab</code> e marque <b>Open VM Settings</b> (mostrado logo abaixo do campo Name) antes de clicar em <b>Save</b>.</li>
+        <li>Antes de arrancar, configure o <i>port forwarding</i> no diálogo VM Settings que acabou de abrir:
+          <ul>
+            <li>Seleccione <b>Network</b> na barra lateral esquerda.</li>
+            <li>Altere <b>Network Mode</b> de <i>Shared Network</i> (omissão) para <b>Emulated VLAN</b>. Só este modo expõe o <i>port forwarding</i>.</li>
+            <li>Uma nova entrada <b>Port Forwarding</b> surge na barra lateral esquerda. Seleccione-a e clique em <b>New</b>.</li>
+            <li>Preencha as colunas (ordem do UTM: <i>Protocol, Guest Address, Guest Port, Host Address, Host Port</i>): Protocol <b>TCP</b>; Guest Port <b>22</b>; Host Port <b>2222</b>. Deixe Guest Address e Host Address em branco.</li>
+            <li>Feche o diálogo Settings para guardar.</li>
+          </ul>
+        </li>
+        <li>Inicie a VM e instale o Ubuntu Server. Aceite o idioma por omissão. No ecrã <b>Keyboard configuration</b>, defina <b>Layout: Portuguese</b> e <b>Variant: Portuguese - Portuguese (Macintosh)</b> se estiver a usar um MacBook com teclado português (o caso típico desta disciplina); caso contrário, escolha o <i>layout</i> e variante que correspondem ao seu teclado físico. No ecrã <b>SSH Setup</b>, marque <b>Install OpenSSH server</b> para que o <i>guest</i> fique à escuta na porta 22.</li>
+        <li>Depois da instalação, desligue a VM em vez de reiniciar; retire a ISO (<i>Edit VM &rarr; Drives</i>); inicie a VM de novo. (Se o <i>installer</i> só ofereceu "Reboot" e vir uma linha vermelha <code>[FAILED] Failed unmounting /dev/cdrom</code>, pare a VM à força na barra de ferramentas do UTM, retire a ISO e inicie de novo. A mensagem é inofensiva; a ISO só precisa de sair.) Depois, num Terminal do Mac:
+          <pre>ssh -p 2222 &lt;o-seu-utilizador&gt;@localhost</pre>
+        </li>
+        <li>Dentro da VM:
+          <pre>sudo apt install gcc gdb python3</pre>
+        </li>
+      </ol>
+      <p class="note"><b>Reserve 60 a 90 minutos ou mais para a instalação inicial do Ubuntu.</b> O UTM emula x86-64 em software e o Ubuntu 22.04 aplica vários anos de atualizações de segurança acumuladas durante a instalação. Faça esta configuração antes da sessão de laboratório, não durante. Para os exercícios em si, o custo de emulação é imperceptível (o trabalho compila ficheiros C pequenos e executa-os sobre entradas curtas). Custo real em disco: cerca de 5 a 8 GB.</p>
+    `,
+
+    path_arm_other: () => `
+      <h2>Windows ARM ou Linux ARM</h2>
+      <p>O seu CPU é ARM mas o seu SO não é macOS. O trabalho de Segurança de Software requer x86-64, pelo que precisa de uma camada de emulação; a ferramenta concreta depende do SO:</p>
+      <ul>
+        <li><b>Windows ARM (Snapdragon X, Surface Pro 11, outros PCs ARM64):</b> instale o <b>Docker Desktop for Windows</b> a partir de <a href="https://www.docker.com/products/docker-desktop/">docker.com</a>. Uma vez instalado, use o ficheiro <i>compose</i> do Caminho 4 (abaixo). O Docker Desktop em Windows ARM trata automaticamente da emulação x86-64. O WSL2 em Windows ARM passa por omissão um Linux arm64 e <b>não</b> é adequado para este trabalho.</li>
+        <li><b>Linux ARM (Raspberry Pi, Asahi Linux):</b> instale o Docker Engine, ative os <i>handlers</i> <code>qemu-user-static</code> para <code>binfmt</code> (<code>sudo apt install qemu-user-static</code> em Debian/Ubuntu), e depois use o ficheiro <i>compose</i> do Caminho 4. Espere que trabalho limitado por CPU seja significativamente mais lento do que em nativo.</li>
+      </ul>
+      <p>Ficheiro <i>compose</i> para <code>docker-compose.yml</code>:</p>
+      <pre>${compose}</pre>
+      <p>Dentro do <i>container</i> em execução:</p>
+      <pre>apt update && apt install -y gcc gdb python3</pre>
+      <p class="note">Estas combinações são raras entre os alunos. Consulte <code>Lab - Guia de Configuracao do Ambiente.md</code> e traga ao fórum da disciplina qualquer problema.</p>
+    `,
+  };
+
+  // ---- 4. Renderização reactiva -------------------------------------------
+
+  const form     = qs('#wizard');
+  const resultEl = qs('#result');
+
+  const readAnswers = () => ({
+    os:         (form.querySelector('input[name="os"]:checked')   || {}).value || null,
+    arch:       (form.querySelector('input[name="arch"]:checked') || {}).value || null,
+    haveUbuntu: form.querySelector('input[name="haveUbuntu"]').checked,
+    webLab:     form.querySelector('input[name="webLab"]').checked,
+    skipGdb:    form.querySelector('input[name="skipGdb"]').checked,
+  });
+
+  const render = () => {
+    const answers = readAnswers();
+
+    // Fieldsets condicionais:
+    //   Ubuntu existente só interessa para x86-64 (Ubuntu ARM não satisfaz o trabalho).
+    //   Trabalho anterior para macOS e Windows (Docker é a instalação prévia comum em ambos),
+    //   e apenas quando o estudante ainda não tem Ubuntu (o Caminho 1 ignora a resposta).
+    //   GDB só para ARM (a decisão entre Apple Silicon e UTM).
+    qs('#haveUbuntuFieldset').classList.toggle('hidden', answers.arch !== 'x86_64');
+    qs('#webLabFieldset'    ).classList.toggle('hidden', (answers.os !== 'macos' && answers.os !== 'windows') || answers.haveUbuntu);
+    qs('#gdbFieldset'       ).classList.toggle('hidden', answers.arch !== 'arm64');
+
+    const pathKey = decide(answers);
+    if (!pathKey || !paths[pathKey]) {
+      resultEl.innerHTML = '<p class="note">Responda às perguntas acima para ver os passos de configuração adequados ao seu caso.</p>';
+      return;
+    }
+    resultEl.innerHTML = `<div class="path-card">${paths[pathKey]()}</div>`;
+  };
+
+  form.addEventListener('input',  render);
+  form.addEventListener('change', render);
+  render();
+})();
+</script>
+</body>
+</html>

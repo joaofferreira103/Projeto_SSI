@@ -1,0 +1,24 @@
+Se Alice omitir a verificação do certificado de Bob utilizando a CA, mas ainda verificar a assinatura de Bob, o protocolo não será imune a ataques de Man-in-the-Middle (MitM). Aqui está o motivo:
+
+1. Função do Certificado no Protocolo STS
+   - O certificado de Bob, assinado pela CA, garante que a chave pública de Bob é autêntica e pertence realmente a Bob.
+   - Sem verificar o certificado, Alice não tem como garantir que a chave pública recebida realmente pertence a Bob. Um atacante (Mallory) pode interceptar a comunicação, substituir a chave pública de Bob pela sua própria e assinar as mensagens com sua chave privada.
+
+2. Por que a Verificação da Assinatura Não é Suficiente?
+   - A assinatura de Bob é gerada com a chave privada correspondente à chave pública enviada. Se Mallory substituir a chave pública de Bob pela sua própria, Mallory pode gerar uma assinatura válida com sua própria chave privada.
+   - Como Alice não verificou o certificado de Bob, ela não detectará que a chave pública foi substituída.
+
+3. Cenário de Ataque MitM
+   - Passo 1: Mallory intercepta a mensagem de Alice contendo `gx` e envia sua própria chave pública `gm` para Bob.
+   - Passo 2: Mallory intercepta a mensagem de Bob contendo `gy`, substitui por `gm`, e envia para Alice.
+   - Passo 3: Mallory calcula dois segredos compartilhados:
+     - Um com Alice: \( K_{AM} = g^{x \cdot m} \)
+     - Outro com Bob: \( K_{BM} = g^{y \cdot m} \)
+   - Mallory pode descriptografar e recriptografar mensagens entre Alice e Bob, mantendo o ataque invisível.
+
+4. Conclusão
+   - Sem a verificação do certificado de Bob, Alice não pode garantir que a chave pública pertence realmente a Bob.
+   - Portanto, o protocolo não é imune a ataques de Man-in-the-Middle se a verificação do certificado for omitida, mesmo que a assinatura seja verificada.
+
+5. Recomendação
+   - Para garantir a imunidade a ataques de MitM, é obrigatório verificar os certificados de Alice e Bob utilizando a CA, além de validar as assinaturas trocadas no protocolo Station-to-Station.
