@@ -233,6 +233,12 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
                     "senders": senders,
                 })
 
+            elif msg_type == "key_rotate":
+                # Forward rotation signal to peer so they also generate a new key
+                target = msg.get("to", "")
+                if target:
+                    _deliver(target, {"type": "key_rotate", "from": username})
+
             elif msg_type == "quit":
                 send_json(conn, {"type": "ok", "message": "Goodbye!"})
                 break

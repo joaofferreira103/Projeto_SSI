@@ -47,7 +47,8 @@ _offline_session_keys: dict[str, bytes] = {}
 # Who we're currently "talking to"
 _current_peer: str | None = None
 
-_message_counts: dict[str, int] = {}
+_message_counts: dict[str, int] = {}  # mensagens enviadas por peer
+_received_counts: dict[str, int] = {}  # mensagens recebidas por peer
 
 # Buffer for offline messages that arrive before _offline_private_key is loaded
 _pending_offline_messages: list[dict] = []
@@ -70,7 +71,7 @@ _sock: socket.socket | None = None
 # Tracks peers to whom the last send used the offline key — suppresses false warn
 _last_sent_was_offline: set[str] = set()
 
-KEY_ROTATION_THRESHOLD = 50  # rotaciona a cada 50 mensagens enviadas
+KEY_ROTATION_THRESHOLD = 5  # rotaciona após N mensagens (enviadas + recebidas por peer)
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +314,9 @@ def _handle_key_response(msg: dict) -> None:
     secret = derive_shared_secret(_private_key, peer_pub_bytes)
     _session_keys[peer] = secret
     _current_peer = peer
+    # Reset message counters for the new session window
+    _message_counts[peer] = 0
+    _received_counts[peer] = 0
 
     print(f"\n  [CRYPTO] Secure channel established with '{peer}' OK")
     print(f"  [CRYPTO] You can now use: /msg {peer} <text>")
@@ -458,6 +462,11 @@ def receive_loop(sock: socket.socket, stop_event: threading.Event) -> None:
                     try:
                         plaintext = decrypt_message(key, ciphertext_hex)
                         print(f"\n  {sender}: {plaintext}")
+                        # Count received messages toward rotation threshold (bidirectional)
+                        _received_counts[sender] = _received_counts.get(sender, 0) + 1
+                        if _received_counts[sender] >= KEY_ROTATION_THRESHOLD:
+                            _received_counts[sender] = 0
+                            _rotate_key(sock, sender)
                     except (InvalidTag, ValueError) as e:
                         print(f"\n  [WARN]  {sender} [DECRYPTION FAILED — message discarded]: {e}")
                 else:
@@ -512,6 +521,12 @@ def receive_loop(sock: socket.socket, stop_event: threading.Event) -> None:
                 elif not detail.startswith("Delivered to") and not detail.startswith("Synced"):
                     print(f"\n  [INFO] {detail}")
                     print("  > ", end="", flush=True)
+
+            elif msg_type == "key_rotate":
+                # Peer initiated a key rotation — we must also generate a new key
+                peer = msg.get("from")
+                if peer:
+                    _handle_peer_rotation(sock, peer)
 
             elif msg_type == "key_response":
                 _handle_key_response(msg)
@@ -689,7 +704,7 @@ def chat_loop_interactive(sock: socket.socket, username: str, stop_event: thread
                     _show_offline_message(peer)
                 continue
 
-           
+
             if _current_peer:
                 _send_encrypted(sock, _current_peer, line)
             else:
@@ -782,16 +797,58 @@ def _send_offline_forced(sock: socket.socket, peer: str, plaintext: str) -> None
 
 
 def _rotate_key(sock: socket.socket, peer: str) -> None:
-    """Gera um novo par de chaves e reinicia o handshake com o peer."""
-    global _private_key
+    """
+    Rotação de chave iniciada pelo lado local.
+
+    Fluxo bidirecional:
+        1. Gera novo par X25519, publica no servidor.
+        2. Notifica o peer via mensagem key_rotate para que ele também rode.
+        3. Pede a chave atual do peer → ambos os lados derivam o mesmo novo segredo.
+    
+    Forward secrecy garantida: a chave privada anterior é descartada imediatamente
+    ao substituir _private_key. O peer fará o mesmo ao receber key_rotate.
+    """
+    global _private_key, _message_counts, _received_counts
     _private_key, pub_bytes = generate_x25519_keypair()
     send_json(sock, {
         "type": "publish_key",
         "public_key": public_bytes_to_hex(pub_bytes),
     })
+    # Notifica o peer para também gerar uma nova chave
+    send_json(sock, {"type": "key_rotate", "to": peer})
+    # Pede a chave do peer (nova, se ele já rodou; antiga caso contrário)
     
     do_handshake(sock, peer)
-    print(f"\n  [CRYPTO] Key rotated after {KEY_ROTATION_THRESHOLD} messages with '{peer}'")
+    
+        # Reseta contadores para a nova janela
+    _message_counts[peer] = 0
+    _received_counts[peer] = 0
+    print(f"\n  [CRYPTO] Key rotated with '{peer}' — new session window started")
+    print("  > ", end="", flush=True)
+
+
+def _handle_peer_rotation(sock: socket.socket, peer: str) -> None:
+    """
+    Rotação iniciada pelo peer remoto (recebemos um key_rotate).
+
+    O peer já publicou uma nova chave pública no servidor.
+    Nós também geramos uma nova chave, publicamos, e fazemos handshake —
+    assim ambos os lados contribuem com material novo para o segredo partilhado.
+    """
+    global _private_key, _message_counts, _received_counts
+    _private_key, pub_bytes = generate_x25519_keypair()
+    send_json(sock, {
+        "type": "publish_key",
+        "public_key": public_bytes_to_hex(pub_bytes),
+    })
+    # Pede a nova chave do peer para derivar o segredo atualizado
+    do_handshake(sock, peer)
+    # Reseta contadores
+    _message_counts[peer] = 0
+    _received_counts[peer] = 0
+    print(f"\n  [CRYPTO] Keys rotated with '{peer}' (peer-initiated) ✓")
+    print("  > ", end="", flush=True)
+
 
 def start_client(host: str = HOST, port: int = PORT) -> None:
     try:
