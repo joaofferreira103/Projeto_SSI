@@ -1,0 +1,65 @@
+
+-Questão 1- impacto de usar NONCE fixo:
+
+Se usarmos um NONCE fixo, o mesmo par (key, nonce) será reutilizado para cifrar múltiplos ficheiros. 
+Isso pode levar a vulnerabilidades graves, como ataques de reutilização de chave, onde um atacante pode comparar os criptogramas 
+resultantes para obter informações sobre os dados cifrados. Em particular, se o mesmo nonce for usado com a mesma chave para cifrar 
+diferentes mensagens, um atacante pode realizar um ataque de XOR entre os criptogramas para recuperar informações sobre as mensagens originais. 
+Portanto, é crucial usar um nonce único para cada cifragem para garantir a segurança do sistema.
+
+-Questão 2- A cifra ChaCha20 , por se tratar de uma cifra sequencial síncronacifra sequencial síncrona, 
+não promove difusão (influência de bits de input no criptograma). Crie uma mensagens e cifre-a.
+Altere apenas um bit da mensagem original e cifre-a com a mesma chave (e NONCE). 
+Alterar um bit do texto-limpo de input afeta quantos bits do criptograma de output
+
+Alterar um bit do texto-limpo de input afeta exatamente um bit do criptograma de output. 
+Isso ocorre porque a cifra ChaCha20 é uma cifra de fluxo, onde cada bit do texto-limpo é cifrado de 
+forma independente usando uma combinação do key stream gerado a partir da chave e do nonce. 
+Portanto, uma alteração em um bit do texto-limpo resultará em uma alteração correspondente no mesmo 
+bit do criptograma, sem afetar os outros bits. Isso destaca a falta de difusão na cifra ChaCha20, 
+onde mudanças em um bit do input não se propagam para outros bits do output.
+
+-Questão 3- Um ataque a uma cifra (não autenticada) consiste tipicamente em executar bit flips: tentar executar modificações no criptograma sem ter que conhecer a chave.
+Para cada um dos modos CBC e CTR, se alterar um bit de um criptograma, quantos bits afeta na mensagem original após decifrar?
+
+No modo CTR, alterar 1 bit do criptograma afeta exatamente 1 bit da mensagem original após decifrar, na mesma posição. 
+Isto acontece porque a decifragem é feita por XOR com o keystream.
+
+No modo CBC, alterar 1 bit de um bloco do criptograma afeta 2 blocos da mensagem original após decifrar:
+- o bloco correspondente fica fortemente corrompido (em geral vários bits);
+- no bloco seguinte, altera exatamente 1 bit, na mesma posição.
+
+Assim, em CTR o efeito é local e previsível (1 bit), enquanto em CBC o efeito espalha-se por 2 blocos.
+
+-Questão 4 - Qual o impacto de utilizar o programa chacha20_int_attck.py nos criptogramas produzidos pelos programas cfich_aes_cbc.py e cfich_aes_ctr.py ?
+Comente e justifique a sua resposta
+
+No caso de AES-CTR, o impacto é semelhante ao observado em ChaCha20. 
+Isto acontece porque CTR, tal como ChaCha20, funciona como uma cifra sequencial: o criptograma é obtido por XOR entre o texto-limpo e um keystream. 
+Assim, se o atacante conhecer o conteúdo de uma certa posição do texto-limpo, pode alterar diretamente o criptograma de forma a que, após decifrar, apareça o novo texto pretendido nessa posição. 
+Logo, o ataque é eficaz em AES-CTR, desde que o formato do ficheiro e a posição considerada estejam corretos.
+
+No caso de AES-CBC, o programa chacha20_int_attck.py não é adequado para produzir uma substituição controlada do texto-limpo. 
+Em CBC, a alteração de um byte do criptograma não se traduz numa alteração previsível do mesmo byte do texto-limpo. 
+Ao decifrar, o bloco correspondente fica fortemente corrompido, e no bloco seguinte ocorre apenas uma alteração previsível de 1 bit/byte na mesma posição. 
+Por isso, o ataque deixa de permitir trocar diretamente um fragmento conhecido por outro fragmento escolhido, como acontece em ChaCha20 ou CTR.
+
+Conclui-se que o ataque implementado em chacha20_int_attck.py é eficaz para criptogramas produzidos com ChaCha20 e também com AES-CTR, mas não funciona de forma controlada para criptogramas produzidos com AES-CBC.
+
+-Questão 5 - Qual a função do salt e do NONCE na versão de password-based encryption do ChaCha20? São ambos necessários conjuntamente?
+
+Função do salt:
+O salt é um valor aleatório gerado na cifragem e armazenado junto com o criptograma. A sua função é tornar única a derivação da chave mesmo que a mesma pass-phrase seja usada em várias cifragens. 
+Sem salt, a mesma pass-phrase produziria sempre a mesma chave, permitindo ataques de dicionário ou rainbow tables pré-computados. Com salt aleatório, o atacante teria de recalcular o PBKDF2 para 
+cada possível pass-phrase com cada salt distinto, tornando esses ataques impraticáveis.
+
+Função do NONCE:
+O NONCE é um valor aleatório usado diretamente pela cifra ChaCha20 para gerar o keystream. A sua função é garantir que, mesmo que a mesma chave seja usada duas vezes,
+o keystream seja diferente em cada cifragem. A reutilização do par (chave, NONCE) em ChaCha20 é catastrófica: um atacante que obtenha dois criptogramas cifrados com o mesmo par pode 
+fazer XOR entre eles e cancelar o keystream, obtendo diretamente o XOR dos dois textos-limpo, comprometendo toda a confidencialidade.
+
+São ambos necessários conjuntamente?
+Sim. Embora à primeira vista possa parecer que um salt sempre fresco garante sempre uma chave diferente (tornando o NONCE dispensável), ambos são necessários por razões distintas:
+- O salt actua ao nível da KDF (PBKDF2): protege a derivação da chave a partir da pass-phrase.
+- O NONCE actua ao nível da cifra (ChaCha20): protege contra a reutilização do keystream.
+Se por algum motivo dois salts colidirem (salt space é finito e colisões são possíveis, embora improváveis), ou se o salt for reutilizado, o NONCE ainda garante keystreams distintos. Além disso, o uso de NONCE é parte integrante do protocolo ChaCha20 e constitui boa prática de defesa em profundidade. Os dois parâmetros operam em camadas diferentes e são complementares, não redundantes.

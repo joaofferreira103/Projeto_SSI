@@ -1,57 +1,120 @@
+#que cifra um ficheiro usando a cifra sequencial ChaCha20 
 import os
 import sys
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
 
-def setup(fkey):
-    # ChaCha20 requer uma chave de 32 bytes (256 bits)
-    key = os.urandom(32)
-    with open(fkey, 'wb') as f:
-        f.write(key)
-    print(f"Chave gerada com sucesso em: {fkey}")
 
-def encrypt(fich, fkey):
-    with open(fkey, 'rb') as kf:
-        key = kf.read()
-    
-    with open(fich, 'rb') as f:
+KEY_SIZE = 32      # 256-bit key for ChaCha20
+NONCE_SIZE = 16    # cryptography ChaCha20 expects 16-byte nonce
+
+
+def setup_key(fkey: str) -> None:
+    key = os.urandom(KEY_SIZE)
+    with open(fkey, "wb") as fk:
+        fk.write(key)
+    print(f"[OK] Chave criada em: {fkey}")
+
+
+def read_key(fkey: str) -> bytes:
+    with open(fkey, "rb") as fk:
+        key = fk.read()
+
+    if len(key) != KEY_SIZE:
+        raise ValueError(f"Chave inválida: esperado {KEY_SIZE} bytes, obtido {len(key)} bytes.")
+
+    return key
+
+
+def encrypt_file(fich: str, fkey: str) -> None:
+    key = read_key(fkey)
+
+    with open(fich, "rb") as f:
         plaintext = f.read()
 
-    # Gerar um NONCE aleatório de 16 bytes
-    nonce = os.urandom(16)
-    algorithm = algorithms.ChaCha20(key, nonce)
-    cipher = Cipher(algorithm, mode=None) # Cifras sequenciais como ChaCha20 não usam 'mode'
+    nonce = os.urandom(NONCE_SIZE)
+    cipher = Cipher(algorithms.ChaCha20(key, nonce), mode=None)
     encryptor = cipher.encryptor()
     ciphertext = encryptor.update(plaintext)
 
-    # Gravar NONCE + Criptograma no ficheiro .enc
-    with open(fich + ".enc", "wb") as f_enc:
-        f_enc.write(nonce + ciphertext)
-    print(f"Ficheiro cifrado: {fich}.enc")
-    
-def decrypt(fich, fkey):
-    # 1. Ler a chave do ficheiro
-    with open(fkey, 'rb') as kf:
-        key = kf.read()
-    
-    # 2. Ler o conteúdo do ficheiro cifrado
-    with open(fich, 'rb') as f:
-        content = f.read()
+    out_file = f"{fich}.enc"
+    with open(out_file, "wb") as out:
+        # guarda nonce + criptograma
+        out.write(nonce + ciphertext)
 
-    # 3. Separar o NONCE do Criptograma
-    nonce = content[:16]
-    ciphertext = content[16:]
+    print(f"[OK] Ficheiro cifrado: {out_file}")
 
-    # 4. Configurar a cifra com os mesmos parâmetros
-    algorithm = algorithms.ChaCha20(key, nonce)
-    cipher = Cipher(algorithm, mode=None)
+
+def decrypt_file(fich: str, fkey: str) -> None:
+    key = read_key(fkey)
+
+    with open(fich, "rb") as f:
+        data = f.read()
+
+    if len(data) < NONCE_SIZE:
+        raise ValueError("Criptograma inválido: tamanho insuficiente para conter NONCE.")
+
+    nonce = data[:NONCE_SIZE]
+    ciphertext = data[NONCE_SIZE:]
+
+    cipher = Cipher(algorithms.ChaCha20(key, nonce), mode=None)
     decryptor = cipher.decryptor()
-    
-    # 5. Decifrar (o processo é idêntico ao de cifrar devido ao XOR)
     plaintext = decryptor.update(ciphertext)
 
-    # 6. Gravar o resultado num ficheiro .dec [cite: 86]
-    with open(fich + ".dec", "wb") as f_dec:
-        f_dec.write(plaintext)
-    
-    print(f"Ficheiro decifrado com sucesso: {fich}.dec")
+    out_file = f"{fich}.dec"
+    with open(out_file, "wb") as out:
+        out.write(plaintext)
+
+    print(f"[OK] Ficheiro decifrado: {out_file}")
+
+
+def usage() -> None:
+    print("Uso:")
+    print("  setup <fkey>")
+    print("  enc <fich> <fkey>")
+    print("  dec <fich> <fkey>")
+
+
+def main() -> None:
+    if len(sys.argv) < 3:
+        usage()
+        sys.exit(1)
+
+    op = sys.argv[1].lower()
+
+    try:
+        if op == "setup":
+            if len(sys.argv) != 3:
+                usage()
+                sys.exit(1)
+            setup_key(sys.argv[2])
+
+        elif op == "enc":
+            if len(sys.argv) != 4:
+                usage()
+                sys.exit(1)
+            encrypt_file(sys.argv[2], sys.argv[3])
+
+        elif op == "dec":
+            if len(sys.argv) != 4:
+                usage()
+                sys.exit(1)
+            decrypt_file(sys.argv[2], sys.argv[3])
+
+        else:
+            usage()
+            sys.exit(1)
+
+    except FileNotFoundError as e:
+        print(f"[ERRO] Ficheiro não encontrado: {e.filename}")
+        sys.exit(1)
+    except ValueError as e:
+        print(f"[ERRO] {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"[ERRO] {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
 
