@@ -1,0 +1,83 @@
+QUESTÃO 1
+
+No ataque de length extension, o cálculo do padding não é feito apenas sobre a 
+mensagem visível (m)[cite: 1]. Como o MAC vulnerável é construído concatenando a 
+chave (k) com a mensagem (m), o padding é calculado sobre (k || m)[cite: 1, 2]:
+
+    MAC(k, m) = SHA256(k || m) [cite: 2]
+
+### Parâmetros do Cenário:
+* Comprimento da chave (k): 32 bytes [cite: 2]
+* Mensagem original (m): "http://www.super-secret.com/manage?id=1001&role=user&perm=read" (62 bytes) [cite: 2]
+* Comprimento total considerado para o cálculo: 32 + 62 = 94 bytes [cite: 3, 4]
+
+### Estrutura do Padding no SHA256:
+O algoritmo SHA256 processa os dados em blocos de 64 bytes. Para completar o 
+bloco, o padding é composto por[cite: 4]:
+1. Um byte inicial com o valor 0x80[cite: 4].
+2. Bytes zero (0x00) até que o comprimento total fique congruente com 56 módulo 64[cite: 5].
+3. Oito (8) bytes finais que contêm o comprimento original em bits[cite: 6].
+
+### Cálculo do Comprimento e Representação do Padding:
+ Comprimento original em bits: 94 bytes x 8 = 752 bits [cite: 7]
+ Conversão para hexadecimal: 752 em hexadecimal = 0x02f0 [cite: 7]
+ Bloco final de 8 bytes de comprimento: 00 00 00 00 00 00 02 f0 [cite: 7]
+
+O padding total acrescentado tem 34 bytes [cite: 7] e assume a seguinte forma[cite: 7]:
+80 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 02 f0 [cite: 7]
+
+*Distribuição dos 34 bytes do padding:*
+* 1 byte: 0x80 [cite: 7]
+* 25 bytes: 0x00 [cite: 8]
+* 8 bytes: Comprimento em bits (0x02f0) [cite: 8]
+
+### Formato da Mensagem Forjada:
+Após o ataque, a mensagem modificada/forjada que é enviada terá a seguinte estrutura[cite: 9]:
+
+    m || padding || &admin=true [cite: 9, 10]
+
+
+QUESTÃO 2
+
+Ao cifrar a mesma mensagem utilizando as duas abordagens, os criptogramas 
+gerados são diferentes tanto no conteúdo como no tamanho[cite: 10]. 
+
+Em nenhuma das soluções existe padding da mensagem[cite: 11]. Isto acontece porque tanto 
+o modo CTR como o modo GCM funcionam como "cifras de sequência" (stream ciphers), 
+garantindo que o ciphertext mantém exatamente o mesmo tamanho do plaintext[cite: 11].
+
+A variação no tamanho final dos ficheiros deve-se exclusivamente aos metadados 
+e aos mecanismos de autenticação adicionados por cada programa[cite: 12].
+
+### 1. Estrutura do Ficheiro: pbenc_aes_ctr_hmac.py
+A autenticação nesta solução é feita externamente com HMAC-SHA256[cite: 17]. O ficheiro 
+gerado segue a estrutura[cite: 13]:
+
+    salt (16 bytes) || nonce (16 bytes) || ciphertext || tag HMAC-SHA256 (32 bytes) [cite: 13, 14]
+
+ Cálculo do Tamanho Final:
+  Tamanho do ficheiro = tamanho da mensagem + 16 + 16 + 32
+  Tamanho do ficheiro = tamanho da mensagem + 64 bytes [cite: 14]
+
+### 2. Estrutura do Ficheiro: pbenc_aes_gcm.py
+A autenticação está integrada nativamente no próprio modo de operação GCM[cite: 19]. 
+O ficheiro gerado segue a estrutura[cite: 14]:
+
+    salt (16 bytes) || nonce (12 bytes) || ciphertext || tag GCM (16 bytes) [cite: 14, 15, 16]
+
+ Cálculo do Tamanho Final:
+  Tamanho do ficheiro = tamanho da mensagem + 16 + 12 + 16
+  Tamanho do ficheiro = tamanho da mensagem + 44 bytes [cite: 16]
+
+### Conclusão e Diferenças Chave:
+ Diferença de Tamanho: O ficheiro produzido por AES-GCM é 20 bytes mais pequeno 
+  do que o produzido por AES-CTR + HMAC[cite: 16].
+ Requisitos do AES-CTR + HMAC: Exige uma segunda chave derivada pela KDF[cite: 17], 
+  uma tag mais longa (32 bytes) [cite: 18] e um nonce maior (16 bytes)[cite: 18].
+ Requisitos do AES-GCM: Fornece confidencialidade e integridade de forma mais 
+  compacta e eficiente [cite: 20], utilizando tipicamente um nonce de 12 bytes [cite: 19] e 
+  uma tag de 16 bytes[cite: 19].
+
+Embora o AES-GCM utilize internamente um mecanismo semelhante ao modo CTR para a 
+cifra, o resultado final não é igual: possuem estruturas distintas, tags de 
+autenticação diferentes e o AES-GCM resulta num ficheiro final mais curto[cite: 21].
