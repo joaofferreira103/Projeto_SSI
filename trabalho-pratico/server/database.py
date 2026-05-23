@@ -132,27 +132,33 @@ class Database:
     # -------------------------------------------------------------------------
 
     def store_public_key(self, username: str, public_key_hex: str) -> None:
-        """Store (or replace) a user's ephemeral X25519 public key."""
+        """Store (or replace) a user's ephemeral X25519 public key, preserving offline_public_key."""
         with self._lock:
             self._conn.execute(
-                "INSERT OR REPLACE INTO public_keys (username, public_key) VALUES (?, ?)",
+                """INSERT INTO public_keys (username, public_key)
+                   VALUES (?, ?)
+                   ON CONFLICT(username) DO UPDATE SET
+                       public_key   = excluded.public_key,
+                       uploaded_at  = datetime('now')""",
                 (username, public_key_hex),
             )
             self._conn.commit()
 
     def get_public_key(self, username: str) -> str | None:
-        """Return the hex public key for a user, or None if not present."""
+        """Return the hex public key for a user, or None if not present or logged out."""
         row = self._conn.execute(
             "SELECT public_key FROM public_keys WHERE username = ?",
             (username,),
         ).fetchone()
-        return row["public_key"] if row else None
+        if row and row["public_key"]:
+            return row["public_key"]
+        return None
 
     def remove_public_key(self, username: str) -> None:
-        """Delete a user's public key on logout."""
+        """Clear a user's ephemeral session key on logout (keeps offline_public_key intact)."""
         with self._lock:
             self._conn.execute(
-                "DELETE FROM public_keys WHERE username = ?", (username,)
+                "UPDATE public_keys SET public_key = '' WHERE username = ?", (username,)
             )
             self._conn.commit()
 
@@ -168,14 +174,18 @@ class Database:
             offline_public_key_hex: The hex-encoded X25519 public key
         """
         with self._lock:
-            # Use INSERT OR REPLACE to handle case where session key hasn't been published yet
+            # First, ensure a row exists for this username (with empty session key placeholder)
+            # Then update the offline key
             self._conn.execute(
-                """INSERT INTO public_keys (username, offline_public_key, offline_uploaded_at)
-                   VALUES (?, ?, datetime('now'))
-                   ON CONFLICT(username) DO UPDATE SET 
-                   offline_public_key = excluded.offline_public_key,
-                   offline_uploaded_at = excluded.offline_uploaded_at""",
-                (username, offline_public_key_hex),
+                """INSERT OR IGNORE INTO public_keys (username, public_key) 
+                   VALUES (?, '')""",
+                (username,),
+            )
+            self._conn.execute(
+                """UPDATE public_keys 
+                   SET offline_public_key = ?, offline_uploaded_at = datetime('now')
+                   WHERE username = ?""",
+                (offline_public_key_hex, username),
             )
             self._conn.commit()
 
@@ -259,6 +269,25 @@ class Database:
                 (recipient,),
             )
             self._conn.commit()
+
+    def get_offline_senders(self, recipient: str) -> list[str]:
+        """
+        Get list of senders who have offline messages for this user.
+        
+        Args:
+            recipient: The username to check
+            
+        Returns:
+            List of unique sender usernames
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT DISTINCT sender FROM offline_messages 
+                   WHERE recipient = ?
+                   ORDER BY sender""",
+                (recipient,),
+            ).fetchall()
+            return [row["sender"] for row in rows]
 
     def count_offline_messages(self, recipient: str) -> int:
         """

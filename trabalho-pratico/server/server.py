@@ -94,21 +94,8 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
                         connected_users[username] = conn
                     send_json(conn, {"type": "ok", "message": reason, "username": username})
                     print(f"[SERVER] '{username}' logged in from {addr}")
-                    
-                    # Deliver any pending offline messages
-                    offline_msgs = db.get_offline_messages(username)
-                    for offline_msg in offline_msgs:
-                        send_json(conn, {
-                            "type": "message",
-                            "from": offline_msg["sender"],
-                            "text": offline_msg["ciphertext_hex"],
-                            "sender_offline_public_key": offline_msg["sender_offline_public_key"],
-                        })
-                    
-                    # Delete offline messages after delivery
-                    if offline_msgs:
-                        db.delete_offline_messages(username)
-                        print(f"[SERVER] Delivered {len(offline_msgs)} offline message(s) to '{username}'")
+                    # NOTE: Do NOT send offline messages immediately.
+                    # Client will request them via 'sync_offline_messages' after loading offline key.
                 else:
                     send_json(conn, {"type": "error", "message": reason})
 
@@ -215,6 +202,36 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
                         "type": "error",
                         "message": f"No offline public key found for '{target}'",
                     })
+
+            elif msg_type == "sync_offline_messages":
+                # Client is ready to receive offline messages after loading offline key
+                offline_msgs = db.get_offline_messages(username)
+                for offline_msg in offline_msgs:
+                    send_json(conn, {
+                        "type": "message",
+                        "from": offline_msg["sender"],
+                        "text": offline_msg["ciphertext_hex"],
+                        "sender_offline_public_key": offline_msg["sender_offline_public_key"],
+                    })
+                
+                # Delete offline messages after delivery
+                if offline_msgs:
+                    db.delete_offline_messages(username)
+                    print(f"[SERVER] Delivered {len(offline_msgs)} offline message(s) to '{username}'")
+                
+                # Send confirmation
+                send_json(conn, {
+                    "type": "ok",
+                    "message": f"Synced {len(offline_msgs)} offline message(s)"
+                })
+
+            elif msg_type == "get_offline_senders":
+                # Return list of users who have offline messages for this user
+                senders = db.get_offline_senders(username)
+                send_json(conn, {
+                    "type": "offline_senders",
+                    "senders": senders,
+                })
 
             elif msg_type == "quit":
                 send_json(conn, {"type": "ok", "message": "Goodbye!"})
