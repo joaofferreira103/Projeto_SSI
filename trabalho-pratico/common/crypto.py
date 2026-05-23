@@ -12,18 +12,11 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
 )
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 from cryptography.exceptions import InvalidKey, InvalidTag
-
-# Import PBKDF2 - compatible with both old and new cryptography versions
-try:
-    # Versão mais recente (como no PC do amigo)
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
-except ImportError:
-    # Fallback para versões antigas
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC as PBKDF2
 
 
 def generate_x25519_keypair() -> tuple[X25519PrivateKey, bytes]:

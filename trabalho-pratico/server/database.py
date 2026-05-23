@@ -168,11 +168,14 @@ class Database:
             offline_public_key_hex: The hex-encoded X25519 public key
         """
         with self._lock:
+            # Use INSERT OR REPLACE to handle case where session key hasn't been published yet
             self._conn.execute(
-                """UPDATE public_keys 
-                   SET offline_public_key = ?, offline_uploaded_at = datetime('now')
-                   WHERE username = ?""",
-                (offline_public_key_hex, username),
+                """INSERT INTO public_keys (username, offline_public_key, offline_uploaded_at)
+                   VALUES (?, ?, datetime('now'))
+                   ON CONFLICT(username) DO UPDATE SET 
+                   offline_public_key = excluded.offline_public_key,
+                   offline_uploaded_at = excluded.offline_uploaded_at""",
+                (username, offline_public_key_hex),
             )
             self._conn.commit()
 
@@ -186,11 +189,12 @@ class Database:
         Returns:
             Hex-encoded X25519 public key, or None
         """
-        row = self._conn.execute(
-            "SELECT offline_public_key FROM public_keys WHERE username = ?",
-            (username,),
-        ).fetchone()
-        return row["offline_public_key"] if row and row["offline_public_key"] else None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT offline_public_key FROM public_keys WHERE username = ?",
+                (username,),
+            ).fetchone()
+            return row["offline_public_key"] if row and row["offline_public_key"] else None
 
     # -------------------------------------------------------------------------
     # Offline message management

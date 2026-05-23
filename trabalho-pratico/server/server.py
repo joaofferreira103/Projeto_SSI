@@ -11,7 +11,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.protocol import send_json, recv_json
-from database import Database
+from server.database import Database
 
 
 HOST = "0.0.0.0"
@@ -29,10 +29,23 @@ def _deliver(recipient: str, envelope: dict) -> bool:
     Try to deliver a JSON envelope to a connected user.
 
     Returns True if delivered, False if the user is offline.
+    If offline and message type is 'message', stores it for later delivery.
     """
     with connected_users_lock:
         sock = connected_users.get(recipient)
     if sock is None:
+        # If it's a message and recipient is offline, store for later
+        if envelope.get("type") == "message":
+            sender = envelope.get("from")
+            ciphertext = envelope.get("text")
+            sender_offline_key = envelope.get("sender_offline_public_key")
+            if sender and ciphertext:
+                db.store_offline_message(
+                    recipient,
+                    sender,
+                    ciphertext,
+                    sender_offline_key,
+                )
         return False
     try:
         send_json(sock, envelope)
@@ -80,6 +93,21 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
                         connected_users[username] = conn
                     send_json(conn, {"type": "ok", "message": reason, "username": username})
                     print(f"[SERVER] '{username}' logged in from {addr}")
+                    
+                    # Deliver any pending offline messages
+                    offline_msgs = db.get_offline_messages(username)
+                    for offline_msg in offline_msgs:
+                        send_json(conn, {
+                            "type": "message",
+                            "from": offline_msg["sender"],
+                            "text": offline_msg["ciphertext_hex"],
+                            "sender_offline_public_key": offline_msg["sender_offline_public_key"],
+                        })
+                    
+                    # Delete offline messages after delivery
+                    if offline_msgs:
+                        db.delete_offline_messages(username)
+                        print(f"[SERVER] Delivered {len(offline_msgs)} offline message(s) to '{username}'")
                 else:
                     send_json(conn, {"type": "error", "message": reason})
 
@@ -104,6 +132,7 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
                
                 recipient = msg.get("to", "")
                 ciphertext = msg.get("text", "")
+                sender_offline_public_key = msg.get("offline_public_key")  # New field
 
                 if not recipient:
                     send_json(conn, {"type": "error", "message": "Missing 'to' field"})
@@ -113,16 +142,21 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
                     send_json(conn, {"type": "error", "message": "Cannot send a message to yourself"})
                     continue
 
-                delivered = _deliver(recipient, {
+                # Build envelope with optional offline public key
+                envelope = {
                     "type": "message",
                     "from": username,
                     "text": ciphertext,  
-                })
+                }
+                if sender_offline_public_key:
+                    envelope["sender_offline_public_key"] = sender_offline_public_key
+
+                delivered = _deliver(recipient, envelope)
 
                 if not delivered:
                     send_json(conn, {
-                        "type": "error",
-                        "message": f"'{recipient}' is not online",
+                        "type": "ok",
+                        "message": f"Message stored for '{recipient}' (offline)",
                     })
                 else:
                   
@@ -135,6 +169,14 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
                     send_json(conn, {"type": "ok", "message": "Public key stored"})
                 else:
                     send_json(conn, {"type": "error", "message": "Missing public_key field"})
+
+            elif msg_type == "publish_offline_key":
+                offline_pub_hex = msg.get("offline_public_key", "")
+                if offline_pub_hex:
+                    db.store_offline_public_key(username, offline_pub_hex)
+                    send_json(conn, {"type": "ok", "message": "Offline public key stored"})
+                else:
+                    send_json(conn, {"type": "error", "message": "Missing offline_public_key field"})
 
             elif msg_type == "get_key":
                 target = msg.get("username", "")
@@ -156,6 +198,21 @@ def handle_client(conn: socket.socket, addr: tuple) -> None:
                     send_json(conn, {
                         "type": "error",
                         "message": f"No public key found for '{target}' (offline?)",
+                    })
+
+            elif msg_type == "get_offline_key":
+                target = msg.get("username", "")
+                offline_pub_hex = db.get_offline_public_key(target)
+                if offline_pub_hex:
+                    send_json(conn, {
+                        "type": "offline_key_response",
+                        "username": target,
+                        "offline_public_key": offline_pub_hex,
+                    })
+                else:
+                    send_json(conn, {
+                        "type": "error",
+                        "message": f"No offline public key found for '{target}'",
                     })
 
             elif msg_type == "quit":
