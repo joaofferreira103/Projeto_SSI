@@ -8,10 +8,11 @@ import threading
 import sys
 import os
 
+sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.protocol import send_json, recv_json
-from server.database import Database
+from database import Database
 
 
 HOST = "0.0.0.0"

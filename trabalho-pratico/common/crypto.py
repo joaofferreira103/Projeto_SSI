@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
 )
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
@@ -214,7 +214,7 @@ def encrypt_offline_key(password: str, private_key: X25519PrivateKey, username: 
     pbkdf2_salt = salt_hash.finalize()[:16]
     
     # Derive 32-byte master key via PBKDF2-SHA256
-    kdf = PBKDF2(
+    kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
         salt=pbkdf2_salt,
@@ -267,7 +267,7 @@ def decrypt_offline_key(password: str, encrypted_blob: str, username: str) -> X2
         raise ValueError("Username mismatch: this offline key belongs to a different user")
     
     # Derive master key
-    kdf = PBKDF2(
+    kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
         salt=pbkdf2_salt,
