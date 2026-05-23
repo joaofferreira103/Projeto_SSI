@@ -1,0 +1,24 @@
+Se Alice não verificar o certificado de Bob emitido pela CA, mas ainda assim validar a sua assinatura, o protocolo continua vulnerável a ataques Man-in-the-Middle (MitM). Eis o porquê:
+
+1. Importância do Certificado no Protocolo STS
+   - O certificado de Bob, emitido e assinado pela CA, serve para comprovar que a chave pública de Bob é legítima e lhe pertence de facto.
+   - Sem essa verificação, Alice não tem qualquer garantia de que a chave pública que recebeu é genuinamente de Bob. Um adversário como Mallory pode-se intrometer na comunicação, trocar a chave pública de Bob pela sua e assinar as mensagens com a sua própria chave privada.
+
+2. Por que Verificar Apenas a Assinatura Não Chega?
+   - A assinatura é produzida com a chave privada associada à chave pública enviada. Se Mallory substituir a chave pública de Bob pela sua, consegue produzir uma assinatura perfeitamente válida.
+   - Dado que Alice não validou o certificado, não tem forma de perceber que a chave pública foi adulterada.
+
+3. Como Funciona o Ataque MitM Neste Cenário
+   - Passo 1: Mallory interceta a mensagem de Alice com `gx` e envia a sua própria chave pública `gm` a Bob.
+   - Passo 2: Mallory interceta a resposta de Bob com `gy`, substitui-a por `gm` e reencaminha para Alice.
+   - Passo 3: Mallory estabelece dois segredos partilhados distintos:
+     - Com Alice: K_AM = g^(x·m)
+     - Com Bob: K_BM = g^(y·m)
+   - Desta forma, Mallory consegue decifrar e voltar a cifrar todas as mensagens trocadas, tornando o ataque completamente transparente para ambas as partes.
+
+4. Conclusão
+   - Sem verificar o certificado de Bob, Alice não tem como confirmar que a chave pública é realmente dele.
+   - Por isso, omitir a verificação do certificado torna o protocolo vulnerável a ataques MitM, mesmo que a assinatura seja verificada.
+
+5. Recomendação
+   - Para que o protocolo Station-to-Station seja verdadeiramente seguro contra ataques MitM, é indispensável validar os certificados de ambas as partes através da CA, em conjunto com a verificação das assinaturas trocadas.
