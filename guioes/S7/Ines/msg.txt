@@ -1,0 +1,1 @@
+http://www.super-secret.com/manage?id=1001&role=user&perm=read

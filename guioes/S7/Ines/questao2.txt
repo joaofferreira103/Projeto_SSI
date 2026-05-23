@@ -1,0 +1,9 @@
+A diferença principal no criptograma é o overhead de autenticação e metadados, não o padding do conteúdo.
+
+-Em ambos os casos, o corpo cifrado tem o mesmo tamanho da mensagem original (CTR é cifra de sequência, sem padding).
+-O ficheiro de pbenc_aes_ctr_hmac.py fica maior porque inclui: magic (8) + salt (16) + nonce CTR (16) + ciphertext (|M|) + HMAC-SHA256 (32), ou seja |M| + 72 bytes.
+-O ficheiro de pbenc_aes_gcm.py inclui: magic (8) + salt (16) + nonce GCM (12) + ciphertext (|M|) + tag GCM (16), ou seja |M| + 52 bytes.
+-Portanto, para a mesma mensagem, nesta implementação, AES-GCM produz ficheiro 20 bytes menor que AES-CTR+HMAC.
+-Motivação da diferença: no CTR+HMAC a autenticação é externa (HMAC de 256 bits); no GCM a autenticação é integrada (tag típica de 128 bits e nonce de 96 bits recomendado).
+
+Além disso, mesmo para a mesma mensagem e password, os criptogramas mudam entre execuções por causa de salt e nonce aleatórios.
